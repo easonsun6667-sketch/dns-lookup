@@ -1,5 +1,6 @@
 # dns-lookup
-A lightweight, browser-based DNS lookup tool for inspecting DNS records and related domain/network information.
+
+A lightweight, browser-based DNS lookup tool for inspecting DNS records and related domain and network information.
 
 ## Features
 
@@ -7,75 +8,61 @@ A lightweight, browser-based DNS lookup tool for inspecting DNS records and rela
 - DNSSEC information
 - ECH (Encrypted Client Hello) information
 - Domain and IP blacklist checks
-- Mail/MX information
+- Mail / MX information
 - RDAP lookup
 - WHOIS fallback
 - Certificate Transparency (CT) lookup
 - Raw JSON response viewing
 - Lookup history
-- Watch/monitor functionality
+- Watch / monitor functionality
 
-## Data Sources
+## How It Works
 
-The application queries publicly available services and APIs, including:
+This project is designed as a static, client-side web application.
 
-- Cloudflare DNS
-- RDAP services
-- WHOIS API
-- Cloudflare trace
-- CertSpotter
-- crt.sh
-- ipwho.is
+Lookup requests are made directly from the user's browser to the relevant public services. The project does not require a dedicated backend for its basic functionality and does not intentionally operate a central proxy or database for third-party lookup results.
 
-Availability and response formats of third-party services may change independently of this project.
+Because requests are performed from the user's browser, availability, CORS policy, rate limits, authentication requirements, response formats, and other service-side policies may affect individual features.
 
-## Usage
+## Responsible Use
 
-The project is designed as a static web application.
+This project is intended for legitimate network, DNS, domain, certificate, and security research purposes.
 
-1. Download or clone the project.
-2. Open `index.html` in a modern browser, or deploy the files to a static hosting service.
-3. Enter a domain name or IP address.
-4. Select the lookup function you want to use.
+Users are responsible for how they use the software and for ensuring that their use complies with all applicable laws, regulations, contracts, acceptable-use policies, and terms of service.
 
-No server-side application is required for the basic static interface.
+In particular, users should not use the project to:
 
-## Turnstile
+- Circumvent access controls or service restrictions
+- Generate excessive or abusive traffic
+- Perform bulk collection where it is not permitted
+- Mirror, redistribute, or republish third-party data without appropriate permission
+- Circumvent authentication, rate limits, quotas, or other technical controls
+- Interfere with the operation or availability of external services
+- Conduct unlawful reconnaissance, abuse, or other prohibited activity
 
-If the project is configured to use Cloudflare Turnstile, replace the placeholder site key in `index.html` with your own Turnstile site key.
+The fact that a service can be queried from a web browser does not by itself grant permission for every possible use of that service.
 
-Do not publish private Turnstile secrets, API tokens, private keys, or other credentials in the repository.
+If you deploy a modified or hosted version of this project, you are responsible for reviewing the current policies and usage requirements of the services your deployment contacts.
 
-## Deployment
+## Third-Party Services
 
-Because the application is static, it can be deployed to services that support static HTML, CSS, and JavaScript hosting.
+This project may communicate with publicly accessible third-party services to obtain DNS, registration, network, certificate, and related information.
 
-Examples include:
+Third-party services are independent of this project. Their availability, APIs, response formats, rate limits, authentication requirements, pricing, acceptable-use policies, and terms may change without notice.
 
-- GitHub Pages
-- Cloudflare Pages
-- Other static hosting platforms
+The project does not claim ownership of third-party services or third-party data returned by those services.
 
-Before deployment, review API endpoints, browser CORS requirements, rate limits, and any third-party service terms.
-
-## Privacy
-
-This repository should not contain:
-
-- Personal domains
-- Personal email addresses
-- API keys or secrets
-- Private tokens
-- Private infrastructure addresses
-- Personal analytics identifiers
-- Deployment-specific credentials
-
-Users should independently review browser-side API requests and third-party services before deploying a modified version.
+Where a third-party service imposes restrictions on production use, automated access, redistribution, commercial use, request volume, or other forms of usage, those restrictions remain the responsibility of the person operating the client or deployment.
 
 ## Project Structure
 
-```text
-.
+
 ├── index.html
 └── README.md
-```
+
+
+## Disclaimer
+
+This software is provided for informational and educational purposes. It is provided on an "as is" basis without guarantees regarding availability, accuracy, completeness, or suitability for a particular purpose.
+
+The project author is not responsible for how users operate the software, how external services respond to requests, or any consequences resulting from a user's use of the software.
