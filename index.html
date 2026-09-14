@@ -1,0 +1,3038 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#f7f7f5">
+<script>
+(function () {
+  try {
+    var t = localStorage.getItem("dnsLookupTheme");
+    if (t !== "light" && t !== "dark") {
+      t = (window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches) ? "dark" : "light";
+    }
+    document.documentElement.setAttribute("data-theme", t);
+  } catch (e) {}
+  try {
+    /*
+     * 入站動畫只在「這個分頁第一次進站」播放一次；同一個分頁裡按重新整理
+     * 不會再觸發。用 sessionStorage 判斷（分頁關掉就會重置，符合「重新
+     * 進站才算」的直覺），必須放在這裡最早期同步執行，才能趕在
+     * #netIntro 這個元素被瀏覽器畫出來、動畫開始播放之前就決定要不要顯示。
+     */
+    if (sessionStorage.getItem("introPlayed")) {
+      document.documentElement.classList.add("no-intro");
+    } else {
+      sessionStorage.setItem("introPlayed", "1");
+    }
+  } catch (e) {}
+})();
+</script>
+<title>DNS Lookup</title>
+<meta name="description" content="DNS Lookup：查詢 DNS、DNSSEC、ECH、RDAP、憑證透明度、雙棧連線與郵件安全設定。">
+<link rel="canonical" href="https://beta.alice9394.uk/">
+<meta property="og:type" content="website">
+<meta property="og:title" content="DNS Lookup">
+<meta property="og:description" content="DNS Lookup：查詢 DNS、DNSSEC、ECH、RDAP、憑證透明度、雙棧連線與郵件安全設定。">
+<meta property="og:url" content="https://beta.alice9394.uk/">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "WebSite",
+  "name": "DNS Lookup",
+  "alternateName": "Alice9394 DNS Lookup",
+  "url": "https://beta.alice9394.uk/"
+}
+</script>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  color-scheme: light;
+  --bg: #f7f7f5;
+  --fg: #1a1a1a;
+  --muted: #6b6b6b;
+  --faint: #666666;
+  --line: #e4e4e0;
+  --panel: #ffffff;
+  --accent: #1a1a1a;
+  --ok: #1a7a3c;
+  --warn: #9a6b00;
+  --err: #b91c1c;
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --sans: system-ui, -apple-system, "Segoe UI", "Noto Sans TC", "Microsoft JhengHei", sans-serif;
+}
+
+html[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #121212;
+  --fg: #e8e8e6;
+  --muted: #9a9a9a;
+  --faint: #a6a6a6;
+  --line: #2a2a2a;
+  --panel: #1a1a1a;
+  --accent: #e8e8e6;
+  --ok: #3dd68c;
+  --warn: #e8b84a;
+  --err: #f07178;
+}
+
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    transition-duration: .001ms !important;
+    animation-duration: .001ms !important;
+  }
+}
+
+html { scroll-behavior: smooth; }
+body {
+  font-family: var(--sans);
+  font-size: 15px;
+  line-height: 1.55;
+  color: var(--fg);
+  background: var(--bg);
+  min-height: 100vh;
+}
+
+/* ── 進站：頁面淡入 ── */
+.shell {
+  animation: page-enter 0.55s ease both;
+}
+@keyframes page-enter {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* 同一分頁重新整理：不重播入站動畫，直接顯示 */
+.no-intro #netIntro { display: none; }
+.no-intro .shell { animation: none; opacity: 1; transform: none; }
+
+/* ── 進站：白底 · 淡藍網格 · 外緣繞行（2s，無節點、無十字連線） ── */
+.net-intro {
+  position: fixed;
+  inset: 0;
+  z-index: 9998;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 22px;
+  padding: 24px;
+  background: var(--intro-bg, #ffffff);
+  transition: opacity .45s ease, visibility 0s linear .45s;
+  overflow-y: auto;
+}
+.net-intro.hide {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+.net-intro-stage {
+  position: relative;
+  width: min(200px, 42vw);
+  height: min(200px, 42vw);
+  min-width: 120px;
+  min-height: 120px;
+  border-radius: 50%;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+.net-intro-grid {
+  /* 與圓框同範圍，格線不超出圓框 */
+  position: absolute;
+  inset: 12%;
+  border-radius: 50%;
+  overflow: hidden;
+  background:
+    linear-gradient(var(--intro-grid, rgba(125, 180, 245, 0.5)) 1px, transparent 1px),
+    linear-gradient(90deg, var(--intro-grid, rgba(125, 180, 245, 0.5)) 1px, transparent 1px);
+  background-size: 18px 18px;
+  background-position: center;
+  -webkit-clip-path: circle(50% at 50% 50%);
+  clip-path: circle(50% at 50% 50%);
+  opacity: 0.9;
+  animation: net-grid-pulse 2s ease-in-out both;
+  transform-origin: center center;
+}
+.net-intro-ring {
+  position: absolute;
+  inset: 12%;
+  border-radius: 50%;
+  border: 1.5px solid var(--intro-ring, rgba(125, 180, 245, 0.75));
+  box-shadow: 0 0 0 1px var(--intro-ring-shadow, rgba(147, 197, 253, 0.45));
+  z-index: 1;
+}
+.net-intro-orbit {
+  position: absolute;
+  inset: 12%;
+  border-radius: 50%;
+  z-index: 2;
+  animation: net-orbit-spin 1.4s linear infinite;
+}
+.net-intro-orbit::after {
+  content: "";
+  position: absolute;
+  inset: -3px;
+  border-radius: 50%;
+  border: 3px solid transparent;
+  /* 微幅加深：#93c5fd → #60a5fa，線寬 2px → 3px */
+  border-top-color: var(--intro-orbit, #60a5fa);
+  border-right-color: var(--intro-orbit-soft, rgba(96, 165, 250, 0.55));
+  opacity: 0.98;
+}
+.net-intro-list {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  width: min(360px, 88vw);
+  flex-shrink: 0;
+}
+.net-intro-line {
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: 12px;
+  letter-spacing: .03em;
+  color: var(--intro-text, #1d4ed8);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+  line-height: 1.5;
+}
+.net-intro-line.finished {
+  color: var(--intro-ok, #15803d);
+  font-weight: 700;
+}
+
+@keyframes net-orbit-spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+@keyframes net-grid-pulse {
+  0%   { opacity: 0; transform: scale(0.94); }
+  25%  { opacity: 0.95; transform: scale(1); }
+  100% { opacity: 0.6; transform: scale(1); }
+}
+
+@media (max-height: 480px) {
+  .net-intro { gap: 14px; padding: 16px; }
+  .net-intro-stage { width: min(120px, 32vw); height: min(120px, 32vw); min-width: 90px; min-height: 90px; }
+}
+
+
+/* 入站動畫使用與站內完全相同的 data-theme；第一次進站若沒有使用者偏好，
+   最早期腳本會先讀取系統 prefers-color-scheme，因此不會先亮後暗或先暗後亮。 */
+:root {
+  --intro-bg: #ffffff;
+  --intro-grid: rgba(125, 180, 245, 0.50);
+  --intro-ring: rgba(125, 180, 245, 0.75);
+  --intro-ring-shadow: rgba(147, 197, 253, 0.45);
+  --intro-orbit: #60a5fa;
+  --intro-orbit-soft: rgba(96, 165, 250, 0.55);
+  --intro-text: #1d4ed8;
+  --intro-ok: #15803d;
+}
+
+html[data-theme="dark"] {
+  --intro-bg: #121212;
+  --intro-grid: rgba(96, 165, 250, 0.28);
+  --intro-ring: rgba(147, 197, 253, 0.55);
+  --intro-ring-shadow: rgba(96, 165, 250, 0.28);
+  --intro-orbit: #60a5fa;
+  --intro-orbit-soft: rgba(96, 165, 250, 0.45);
+  --intro-text: #93c5fd;
+  --intro-ok: #4ade80;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .shell { animation: none; }
+  .net-intro { display: none; }
+}
+
+a { color: inherit; }
+button, input {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: none;
+  outline: none;
+}
+button { cursor: pointer; }
+button:disabled { opacity: .5; cursor: wait; }
+:focus-visible { outline: 2px solid var(--fg); outline-offset: 2px; }
+
+/* ── layout ── */
+.shell {
+  display: grid;
+  grid-template-columns: 200px 1fr;
+  max-width: 1080px;
+  margin: 0 auto;
+  min-height: 100vh;
+}
+@media (max-width: 820px) {
+  .shell { grid-template-columns: 1fr; }
+  .toc { display: none; }
+}
+
+/* ── toc ── */
+.toc {
+  position: sticky;
+  top: 0;
+  align-self: start;
+  height: 100vh;
+  padding: 32px 20px 32px 28px;
+  border-right: 1px solid var(--line);
+  overflow-y: auto;
+}
+.toc-brand {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 28px;
+}
+.toc nav { display: flex; flex-direction: column; gap: 2px; }
+.toc a {
+  display: block;
+  padding: 6px 10px;
+  font-size: 13.5px;
+  color: var(--muted);
+  text-decoration: none;
+  border-radius: 4px;
+}
+.toc a:hover { color: var(--fg); background: var(--panel); }
+.toc a.active { color: var(--fg); font-weight: 600; }
+
+/* ── main ── */
+main {
+  padding: 36px 36px 80px;
+}
+@media (max-width: 820px) {
+  main { padding: 24px 18px 64px; }
+}
+
+.page-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 8px;
+}
+.page-head h1 {
+  font-size: 22px;
+  font-weight: 650;
+  letter-spacing: -.02em;
+}
+.page-head p {
+  color: var(--muted);
+  font-size: 13.5px;
+  margin-top: 4px;
+}
+.theme-btn {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+  padding: 0 14px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+  font-size: 13px;
+  font-weight: 550;
+  color: var(--muted);
+  cursor: pointer;
+}
+.theme-btn:hover {
+  border-color: var(--fg);
+  color: var(--fg);
+}
+
+/* ── query bar ── */
+.query {
+  margin: 28px 0 36px;
+  padding: 18px 0;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+.turnstile-wrap {
+  margin-bottom: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+#turnstileWidget { max-width: 300px; }
+.turnstile-hint {
+  font-size: 12.5px;
+  color: var(--faint);
+  font-family: var(--mono);
+}
+.turnstile-hint.ok { color: var(--ok); }
+
+.query-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: stretch;
+}
+.query-row input {
+  flex: 1;
+  min-width: 200px;
+  height: 42px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+  font-family: var(--mono);
+  font-size: 14px;
+}
+.query-row input:focus {
+  border-color: var(--fg);
+}
+.query-row .btn {
+  height: 42px;
+  padding: 0 18px;
+  border-radius: 6px;
+  background: var(--fg);
+  color: var(--bg);
+  font-weight: 600;
+  font-size: 14px;
+}
+.query-row .btn:hover:not(:disabled) { opacity: .88; }
+.query-row .btn:disabled { background: var(--faint); color: var(--panel); }
+
+.query-meta {
+  margin-top: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 20px;
+  align-items: center;
+  font-size: 13px;
+  color: var(--muted);
+}
+.query-meta kbd {
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 1px 5px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: var(--panel);
+}
+.status-line {
+  margin-top: 10px;
+  font-size: 13.5px;
+  color: var(--muted);
+}
+.status-line.ok { color: var(--ok); }
+.status-line.warn { color: var(--warn); }
+.status-line.err { color: var(--err); }
+
+.history {
+  margin-top: 14px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+.history-chip {
+  padding: 4px 10px;
+  font-size: 12.5px;
+  font-family: var(--mono);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--fg);
+}
+.history-chip:hover { border-color: var(--fg); }
+.history .empty { font-size: 12.5px; color: var(--faint); }
+.history-clear {
+  font-size: 12px;
+  color: var(--faint);
+  margin-left: 4px;
+}
+.history-clear:hover { color: var(--muted); }
+
+.watch-row {
+  margin-top: 10px;
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  font-size: 13px;
+}
+.watch-btn {
+  padding: 4px 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+.watch-btn:hover { border-color: var(--fg); color: var(--fg); }
+.watch-btn.active {
+  border-color: var(--ok);
+  color: var(--ok);
+  background: transparent;
+}
+
+/* ── sections ── */
+section {
+  margin-bottom: 48px;
+  scroll-margin-top: 24px;
+}
+section > h2 {
+  font-size: 11.5px;
+  font-weight: 650;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--faint);
+  margin-bottom: 16px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line);
+}
+
+/* ── definition grid ── */
+.dl {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 12px 16px;
+}
+.dl dt {
+  font-size: 11.5px;
+  color: var(--muted);
+  margin-bottom: 2px;
+}
+.dl dd {
+  font-family: var(--mono);
+  font-size: 13.5px;
+  font-weight: 500;
+  word-break: break-all;
+}
+.dl dd.ok { color: var(--ok); }
+.dl dd.warn { color: var(--warn); }
+.dl dd.err { color: var(--err); }
+.dl dd.muted { color: var(--faint); }
+
+/* ── action row ── */
+.action-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+.action-row .btn-outline {
+  height: 34px;
+  padding: 0 14px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  background: var(--panel);
+}
+.action-row .btn-outline:hover:not(:disabled) { border-color: var(--fg); }
+.action-row .hint {
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+/* ── list / report blocks ── */
+.block {
+  padding: 14px 0;
+  border-bottom: 1px solid var(--line);
+}
+.block:last-child { border-bottom: none; }
+.block-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 6px;
+}
+.block-title {
+  font-weight: 600;
+  font-size: 14.5px;
+}
+.tag {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 600;
+  font-family: var(--mono);
+  padding: 2px 7px;
+  border-radius: 3px;
+  border: 1px solid var(--line);
+  color: var(--muted);
+}
+.tag.ok { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 35%, transparent); }
+.tag.warn { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 35%, transparent); }
+.tag.err { color: var(--err); border-color: color-mix(in srgb, var(--err) 35%, transparent); }
+.tag.neutral { color: var(--faint); }
+
+.block-body {
+  font-size: 13.5px;
+  color: var(--muted);
+  line-height: 1.6;
+}
+.block-body .mono {
+  display: block;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  color: var(--fg);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 6px 10px;
+  margin: 6px 0 0;
+  word-break: break-all;
+  white-space: pre-wrap;
+}
+
+/* ── ip lists ── */
+.ip-cols {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+}
+@media (max-width: 600px) {
+  .ip-cols { grid-template-columns: 1fr; }
+}
+.ip-col h3 {
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 8px;
+  color: var(--muted);
+}
+.ip-col ul {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.ip-col li {
+  font-family: var(--mono);
+  font-size: 13px;
+  padding: 6px 10px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  word-break: break-all;
+}
+.ip-col .empty { color: var(--faint); font-size: 13px; font-family: var(--sans); }
+
+/* ── analysis note ── */
+.note {
+  margin-top: 14px;
+  padding: 12px 14px;
+  border-left: 3px solid var(--line);
+  font-size: 13.5px;
+  color: var(--muted);
+  line-height: 1.65;
+}
+.note.ok { border-left-color: var(--ok); }
+.note.warn { border-left-color: var(--warn); }
+.note.err { border-left-color: var(--err); }
+.note.neutral { border-left-color: var(--faint); }
+.note strong { color: var(--fg); font-weight: 600; }
+
+.dkim-note {
+  margin-top: 12px;
+  font-size: 12.5px;
+  color: var(--faint);
+  line-height: 1.65;
+}
+.dkim-note code {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  padding: 1px 4px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+}
+
+/* ── stack / blacklist results ── */
+.result-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+.result-item {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--line);
+}
+.result-item:last-child { border-bottom: none; }
+.result-item-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 4px;
+}
+.result-item-name {
+  font-family: var(--mono);
+  font-weight: 600;
+  font-size: 14px;
+}
+.result-item-meta {
+  font-size: 12.5px;
+  color: var(--muted);
+  font-family: var(--mono);
+  line-height: 1.6;
+}
+.result-item-err {
+  font-size: 13px;
+  color: var(--err);
+  font-family: var(--mono);
+  margin-top: 4px;
+}
+
+/* ── ct / rdap records ── */
+.rec {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--line);
+}
+.rec:last-child { border-bottom: none; }
+.rec-head {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-bottom: 4px;
+}
+.rec-name {
+  font-family: var(--mono);
+  font-size: 12.5px;
+  color: var(--muted);
+}
+.rec-ttl {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--faint);
+}
+.rec-data {
+  font-family: var(--mono);
+  font-size: 13.5px;
+  font-weight: 600;
+  word-break: break-all;
+  white-space: pre-wrap;
+}
+.rec-detail {
+  margin-top: 8px;
+  display: grid;
+  grid-template-columns: 120px 1fr;
+  gap: 3px 10px;
+  font-size: 12.5px;
+}
+.rec-detail .lab { color: var(--muted); }
+.rec-detail .val {
+  font-family: var(--mono);
+  word-break: break-all;
+}
+@media (max-width: 500px) {
+  .rec-detail { grid-template-columns: 1fr; }
+}
+
+/* ── details / raw ── */
+details {
+  border-top: 1px solid var(--line);
+  padding: 12px 0;
+}
+details:last-of-type { border-bottom: 1px solid var(--line); }
+details summary {
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 550;
+  list-style: none;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  color: var(--fg);
+  user-select: none;
+}
+details summary::-webkit-details-marker { display: none; }
+details summary::after {
+  content: "+";
+  font-family: var(--mono);
+  color: var(--faint);
+  font-size: 16px;
+  font-weight: 400;
+}
+details[open] summary::after { content: "−"; }
+details .body { margin-top: 14px; }
+
+.raw-bar {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.raw-bar button {
+  font-size: 12px;
+  padding: 4px 10px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  color: var(--muted);
+  background: var(--panel);
+}
+.raw-bar button:hover { color: var(--fg); border-color: var(--fg); }
+.raw-bar button.copied { color: var(--ok); border-color: var(--ok); }
+
+pre.raw {
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.5;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 14px;
+  overflow: auto;
+  max-height: 520px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--fg);
+}
+.ns-out {
+  font-family: var(--mono);
+  font-size: 12.5px;
+  line-height: 1.55;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 14px;
+  overflow: auto;
+  white-space: pre-wrap;
+  color: var(--fg);
+}
+
+.empty {
+  color: var(--faint);
+  font-size: 13.5px;
+}
+
+.loader {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  height: 2px;
+  background: var(--fg);
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform .3s ease;
+  z-index: 100;
+  pointer-events: none;
+  opacity: 0;
+}
+.loader.on {
+  opacity: 1;
+  animation: load 1s ease-in-out infinite;
+}
+@keyframes load {
+  0% { transform: scaleX(0); transform-origin: left; }
+  50% { transform: scaleX(1); transform-origin: left; }
+  51% { transform-origin: right; }
+  100% { transform: scaleX(0); transform-origin: right; }
+}
+
+.flash {
+  animation: flash 1s ease-in-out 2;
+}
+@keyframes flash {
+  0%, 100% { outline: none; }
+  50% { outline: 2px solid var(--warn); outline-offset: 4px; }
+}
+
+.rdap-link { color: var(--fg); text-decoration: underline; text-underline-offset: 2px; }
+
+.site-contact {
+  margin-top: 48px;
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
+  font-size: 13px;
+  color: var(--muted);
+}
+.site-contact a {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.site-contact a:hover { color: var(--fg); }
+
+
+</style>
+<script>
+window.__turnstileToken = null;
+window.__turnstileReady = false;
+window.onTurnstileSuccess = function (token) {
+  window.__turnstileToken = token || null;
+  window.__turnstileReady = !!token;
+  if (typeof window.__syncTurnstileUI === "function") window.__syncTurnstileUI();
+};
+window.onTurnstileExpired = function () {
+  window.__turnstileToken = null;
+  window.__turnstileReady = false;
+  if (typeof window.__syncTurnstileUI === "function") window.__syncTurnstileUI();
+  try {
+    if (window.turnstile && window.__turnstileWidgetId != null) {
+      window.turnstile.reset(window.__turnstileWidgetId);
+    }
+  } catch (e) {}
+};
+window.onTurnstileError = function () {
+  window.__turnstileToken = null;
+  window.__turnstileReady = false;
+  if (typeof window.__syncTurnstileUI === "function") {
+    window.__syncTurnstileUI("驗證載入失敗，請重新整理頁面後再試");
+  }
+};
+window.onTurnstileLoad = function () {
+  try {
+    var el = document.getElementById("turnstileWidget");
+    if (!el || !window.turnstile) return;
+    if (window.__turnstileWidgetId != null) return;
+    var theme = document.documentElement.getAttribute("data-theme") === "dark" ? "dark" : "light";
+    window.__turnstileWidgetId = window.turnstile.render(el, {
+      sitekey: "0x4AAAAAAEPfvaNoIn2sqhW2",
+      theme: theme,
+      size: "flexible",
+      callback: window.onTurnstileSuccess,
+      "expired-callback": window.onTurnstileExpired,
+      "error-callback": window.onTurnstileError,
+      "timeout-callback": window.onTurnstileExpired
+    });
+  } catch (e) {
+    console.error("Turnstile render failed:", e);
+    if (typeof window.__syncTurnstileUI === "function") {
+      window.__syncTurnstileUI('驗證元件無法載入<br>請寄信至 <a href="mailto:mail@alice9394.uk">mail@alice9394.uk</a> 反映');
+    }
+  }
+};
+</script>
+<script src="https://challenges.cloudflare.com/turnstile/v0/api.js?onload=onTurnstileLoad&render=explicit" async defer></script>
+  <!-- 預先建立所有會用到的第三方服務連線；動畫清單只展示主要三項。 -->
+  <link rel="preconnect" href="https://cloudflare-dns.com" crossorigin>
+  <link rel="preconnect" href="https://rdap.org" crossorigin>
+  <link rel="preconnect" href="https://api.domainee.dev" crossorigin>
+  <link rel="preconnect" href="https://api.certspotter.com" crossorigin>
+  <link rel="preconnect" href="https://crt.sh" crossorigin>
+  <link rel="preconnect" href="https://ipwho.is" crossorigin>
+</head>
+<body>
+
+<div id="topLoader" class="loader"></div>
+
+<!-- 進站：白底淡藍網格 + 外緣繞行（2s） -->
+<div class="net-intro" id="netIntro" aria-hidden="true">
+  <div class="net-intro-stage">
+    <div class="net-intro-grid"></div>
+    <div class="net-intro-ring"></div>
+    <div class="net-intro-orbit"></div>
+  </div>
+  <div class="net-intro-list" id="netIntroList"></div>
+</div>
+
+<div class="shell">
+
+<aside class="toc">
+  <div class="toc-brand">DNS Lookup</div>
+  <nav>
+    <a href="#sec-net">網路狀態</a>
+    <a href="#sec-query">查詢</a>
+    <a href="#sec-resolve">解析結果</a>
+    <a href="#sec-sec">安全檢核</a>
+    <a href="#sec-mail">郵件與憑證</a>
+    <a href="#sec-rdap">註冊資訊</a>
+    <a href="#sec-ct">憑證透明度</a>
+    <a href="#sec-raw">原始資料</a>
+  </nav>
+</aside>
+
+<main>
+
+  <div class="page-head">
+    <div>
+      <h1>DNS Lookup</h1>
+      <p>An easy tool for DNS and Mail service. Hope you enjoy. Version 2.21.0</p>
+    </div>
+    <button type="button" id="themeToggle" class="theme-btn" title="切換亮色／暗色模式">
+      <span id="themeLabel">暗色模式</span>
+    </button>
+  </div>
+
+  <!-- ════════ 網路狀態 ════════ -->
+  <section id="sec-net">
+    <h2>網路狀態</h2>
+    <p class="empty" id="clientIPStatus" style="margin-bottom:12px">正在取得連線資訊…</p>
+    <dl class="dl" id="clientGrid">
+      <dt>IPv4</dt><dd id="clientIPv4">—</dd>
+      <dt>IPv6</dt><dd id="clientIPv6">—</dd>
+      <dt>ISP / ASN</dt><dd id="clientISP">—</dd>
+      <dt>Cloudflare 節點</dt><dd id="clientColo">—</dd>
+      <dt>位置</dt><dd id="clientLocation">—</dd>
+      <dt>金鑰交換</dt><dd id="clientKex">—</dd>
+      <dt>ECH</dt><dd id="clientECH">—</dd>
+      <dt>HTTP</dt><dd id="clientHTTP">—</dd>
+      <dt>TLS</dt><dd id="clientTLS">—</dd>
+      <dt>WARP</dt><dd id="clientWARP">—</dd>
+      <dt>Gateway</dt><dd id="clientGateway">—</dd>
+    </dl>
+
+    <div style="margin-top:28px">
+      <div class="action-row">
+        <button type="button" id="stackTest" class="btn-outline">雙棧連線測試</button>
+        <span class="hint" id="stackStatus">尚未測試</span>
+      </div>
+      <p style="font-size:12.5px;color:var(--muted);margin-bottom:12px;line-height:1.55">
+        分別以 IPv4（1.1.1.1）與 IPv6（2606:4700:4700::1111）字面位址連到 Cloudflare，比較這個網路對兩種協定的可連線性與延遲。測的是「哪個協定連得通、比較快」，不是瀏覽器內部真正的 Happy Eyeballs（RFC 8305）競速過程——那個過程發生在作業系統層，網頁沒辦法從外部觀察或介入。請注意:這並非純粹的網路線路延遲與競速，其中可能包含各種複雜因素，不應作為偵錯維修使用。
+      </p>
+      <div id="stackGrid" class="result-list">
+        <div class="empty">按上方按鈕開始測試。</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ════════ 查詢 ════════ -->
+  <section id="sec-query">
+    <h2>查詢</h2>
+    <div class="query">
+      <div class="turnstile-wrap">
+        <div id="turnstileWidget"></div>
+        <div id="turnstileHint" class="turnstile-hint">請先完成人機驗證</div>
+      </div>
+      <div class="query-row">
+        <input id="domain" value="example.com" placeholder="網域，例如 example.com" autocomplete="off" spellcheck="false">
+        <button id="lookupAll" class="btn" disabled>查詢</button>
+      </div>
+      <div class="query-meta">
+        <span>Enter 送出 · <kbd>/</kbd> 聚焦輸入框</span>
+      </div>
+      <div id="status" class="status-line">請先完成人機驗證</div>
+
+      <div class="history" id="historyChips">
+        <span class="empty">尚無查詢紀錄</span>
+      </div>
+      <button type="button" id="clearHistory" class="history-clear">清除紀錄</button>
+
+      <div class="watch-row">
+        <button type="button" id="watchToggle" class="watch-btn">
+          <span id="watchIcon">◎</span>
+          <span id="watchLabel">開啟監看</span>
+        </button>
+        <span id="watchStatus" style="color:var(--muted)">監看關閉</span>
+      </div>
+      <p style="font-size:12.5px;color:var(--faint);margin-top:6px">
+        監看模式會鎖定目前網域，每 60 秒自動重新查詢一次，並在 A／AAAA 結果變動時提醒你——適合拿來觀察 DDNS 更新是否已經傳播。開啟期間網域輸入框會鎖定，關閉後才能再次修改。
+      </p>
+    </div>
+  </section>
+  <!-- ════════ 解析結果 ════════ -->
+  <section id="sec-resolve">
+    <h2>解析結果</h2>
+    <p id="summaryMode" class="empty" style="margin-bottom:14px">尚未查詢</p>
+    <dl class="dl" id="summaryGrid">
+      <dt>網域</dt><dd>—</dd>
+      <dt>Resolver</dt><dd class="muted">Cloudflare 1.1.1.1</dd>
+      <dt>狀態</dt><dd>—</dd>
+      <dt>唯一紀錄</dt><dd>0</dd>
+    </dl>
+
+    <div style="margin-top:28px">
+      <div class="action-row">
+        <span class="hint" id="ipSummaryText">A / AAAA 尚未查詢</span>
+      </div>
+      <div id="ipSummary" class="ip-cols">
+        <div class="ip-col">
+          <h3>A · IPv4</h3>
+          <ul><li class="empty">沒有資料</li></ul>
+        </div>
+        <div class="ip-col">
+          <h3>AAAA · IPv6</h3>
+          <ul><li class="empty">沒有資料</li></ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ════════ 安全檢核 ════════ -->
+  <section id="sec-sec">
+    <h2>安全檢核 · DNSSEC / ECH</h2>
+    <div id="dnssecSummary" class="dl" style="margin-bottom:16px">
+      <div><dt>驗證狀態</dt><dd class="muted">尚未查詢</dd></div>
+    </div>
+    <div id="dnssecFlags" class="dl" style="margin-bottom:16px"></div>
+    <div id="dnssecAnalysis" class="note neutral">
+      <strong>DNSSEC</strong><br>尚未查詢。
+    </div>
+    <div id="echStatus" class="note neutral" style="margin-top:10px">
+      <strong>ECH</strong><br>尚未查詢。
+    </div>
+
+    <div style="margin-top:32px">
+      <div class="action-row">
+        <button type="button" id="blacklistCheck" class="btn-outline">檢查黑名單</button>
+        <span class="hint" id="blacklistStatus">請先查詢網域</span>
+      </div>
+      <p style="font-size:12.5px;color:var(--muted);margin-bottom:12px;line-height:1.55">
+        對解析出的每個 IPv4 位址，依序反查 Spamhaus、SpamCop、Barracuda、SORBS 這幾個常見黑名單，適合排查郵件寄不出去或連線被擋的問題。多數黑名單服務對 IPv6 支援有限，這裡先只檢查 IPv4。標黃的「查詢被節流」代表 Spamhaus 判定這是透過公共解析器（本工具走 Cloudflare 1.1.1.1）發出的查詢而拒答，不是這個 IP 真的被列入黑名單。
+      </p>
+      <div id="blacklistGrid" class="result-list">
+        <div class="empty">查詢網域後再按「檢查黑名單」。</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ════════ 郵件與憑證 ════════ -->
+  <section id="sec-mail">
+    <h2>郵件與憑證治理</h2>
+    <div id="mailGrid">
+      <div class="empty">尚未查詢。</div>
+    </div>
+    <div id="mailAnalysis" class="note warn" style="margin-top:14px">
+      <strong>郵件安全綜合狀態</strong><br>尚未查詢。
+    </div>
+    <div class="dkim-note">
+      <strong style="color:var(--fg)">關於 DKIM：</strong>這裡沒有 DKIM 檢查項目，不是漏掉了，是技術上就查不到。DKIM 記錄放在 <code>&lt;selector&gt;._domainkey.&lt;網域&gt;</code>，但 selector 是網域自己取的任意名稱，不像 MX／SPF／DMARC 有固定位置可以直接查——唯一能百分之百知道 selector 是什麼的方法，是去看一封「這個網域實際寄出的信」，信件標頭 <code>DKIM-Signature</code> 裡的 <code>s=</code> 欄位才會寫明。這裡從頭到尾只查 DNS，沒有郵件內容可以看，所以沒辦法確認。
+    </div>
+  </section>
+
+  <!-- ════════ RDAP ════════ -->
+  <section id="sec-rdap">
+    <h2>註冊資訊 · RDAP</h2>
+    <p id="rdapQueryName" class="empty" style="margin-bottom:12px">尚未查詢</p>
+    <div id="rdapStatusSummary" class="dl" style="margin-bottom:16px">
+      <div class="empty">尚未查詢 RDAP。</div>
+    </div>
+    <div id="rdapSummary">
+      <div class="empty">尚未查詢 RDAP。</div>
+    </div>
+  </section>
+
+  <!-- ════════ CT ════════ -->
+  <section id="sec-ct">
+    <h2>憑證透明度</h2>
+    <p id="ctStatus" class="empty" style="margin-bottom:12px">尚未查詢</p>
+    <div id="ctStatusSummary" class="dl" style="margin-bottom:16px">
+      <div class="empty">尚未查詢。</div>
+    </div>
+    <div id="ctGrid">
+      <div class="empty">尚未查詢。</div>
+    </div>
+  </section>
+
+  <!-- ════════ 原始資料 ════════ -->
+  <section id="sec-raw">
+    <h2>原始資料</h2>
+
+    <details id="collapseDnssec">
+      <summary>DNSSEC 詳細紀錄</summary>
+      <div class="body" id="dnssecRecords"><div class="empty">尚未查詢。</div></div>
+    </details>
+
+    <details id="collapseOther">
+      <summary>其他 DNS 紀錄 <span id="otherCount" style="color:var(--faint);font-weight:400;margin-left:6px">0 筆</span></summary>
+      <div class="body" id="otherRecords"><div class="empty">尚未查詢。</div></div>
+    </details>
+
+    <details id="collapseAuth">
+      <summary>Authority / Additional</summary>
+      <div class="body">
+        <p style="font-size:12.5px;color:var(--muted);margin-bottom:8px">Authority</p>
+        <div id="authorityRecords"><div class="empty">沒有資料</div></div>
+        <p style="font-size:12.5px;color:var(--muted);margin:16px 0 8px">Additional</p>
+        <div id="additionalRecords"><div class="empty">沒有資料</div></div>
+      </div>
+    </details>
+
+    <details id="collapseNslookup">
+      <summary>NSLOOKUP 輸出</summary>
+      <div class="body">
+        <div class="raw-bar">
+          <button type="button" class="copy-btn" data-copy-target="nslookup">複製</button>
+          <button type="button" class="copy-btn" data-download-target="nslookup" data-download-ext="txt" data-download-mime="text/plain">下載</button>
+        </div>
+        <div id="nslookup" class="ns-out">尚未查詢</div>
+      </div>
+    </details>
+
+    <details id="collapseJson">
+      <summary>原始 JSON</summary>
+      <div class="body">
+        <div class="raw-bar">
+          <button type="button" class="copy-btn" data-copy-target="raw">複製</button>
+          <button type="button" class="copy-btn" data-download-target="raw" data-download-ext="json" data-download-mime="application/json">下載</button>
+        </div>
+        <pre id="raw" class="raw">尚未查詢</pre>
+        <pre id="rdapRaw" hidden>尚未查詢</pre>
+      </div>
+    </details>
+  </section>
+
+
+  <footer class="site-contact" aria-label="聯絡資訊">
+    <a href="mailto:mail@alice9394.uk">mail@alice9394.uk</a>
+  </footer>
+
+</main>
+</div>
+
+<script>
+/* =========================================================
+   API
+========================================================= */
+const DNS_API = "https://cloudflare-dns.com/dns-query";
+const RDAP_API = "https://rdap.org/domain/";
+const WHOIS_API = "https://api.domainee.dev/v1/tools/whois-lookup";
+const STACK_TEST_V4 = "https://1.1.1.1/cdn-cgi/trace";
+const STACK_TEST_V6 = "https://[2606:4700:4700::1111]/cdn-cgi/trace";
+const CERTSPOTTER_API = "https://api.certspotter.com/v1/issuances";
+const CRTSH_API = "https://crt.sh/";
+
+const DNS_TYPES = {
+  1:"A",2:"NS",5:"CNAME",6:"SOA",12:"PTR",15:"MX",16:"TXT",17:"RP",
+  28:"AAAA",33:"SRV",35:"NAPTR",39:"DNAME",43:"DS",44:"SSHFP",45:"IPSECKEY",
+  46:"RRSIG",47:"NSEC",48:"DNSKEY",49:"DHCID",50:"NSEC3",51:"NSEC3PARAM",
+  52:"TLSA",53:"SMIMEA",64:"SVCB",65:"HTTPS",99:"SPF",108:"EUI48",109:"EUI64",257:"CAA"
+};
+
+const ALL_TYPES = [
+  "A","AAAA","CNAME","MX","NS","TXT","SOA","CAA","SRV","NAPTR","PTR","TLSA","HTTPS","SVCB",
+  "DS","DNSKEY","RRSIG","NSEC","NSEC3"
+];
+const DNSSEC_TYPES = ["DS","DNSKEY","RRSIG","NSEC","NSEC3"];
+
+/* =========================================================
+   DOM
+========================================================= */
+const domain = document.getElementById("domain");
+const lookupAll = document.getElementById("lookupAll");
+const historyChips = document.getElementById("historyChips");
+const clearHistoryBtn = document.getElementById("clearHistory");
+const watchToggleBtn = document.getElementById("watchToggle");
+const watchIcon = document.getElementById("watchIcon");
+const watchLabel = document.getElementById("watchLabel");
+const watchStatus = document.getElementById("watchStatus");
+const stackTestBtn = document.getElementById("stackTest");
+const stackStatus = document.getElementById("stackStatus");
+const stackGrid = document.getElementById("stackGrid");
+const mailGrid = document.getElementById("mailGrid");
+const mailAnalysis = document.getElementById("mailAnalysis");
+const blacklistBtn = document.getElementById("blacklistCheck");
+const blacklistStatus = document.getElementById("blacklistStatus");
+const blacklistGrid = document.getElementById("blacklistGrid");
+const ctStatus = document.getElementById("ctStatus");
+const ctGrid = document.getElementById("ctGrid");
+const rdapStatusSummary = document.getElementById("rdapStatusSummary");
+const ctStatusSummary = document.getElementById("ctStatusSummary");
+const status = document.getElementById("status");
+const summaryGrid = document.getElementById("summaryGrid");
+const summaryMode = document.getElementById("summaryMode");
+const ipSummary = document.getElementById("ipSummary");
+const ipSummaryText = document.getElementById("ipSummaryText");
+const dnssecSummary = document.getElementById("dnssecSummary");
+const dnssecFlags = document.getElementById("dnssecFlags");
+const dnssecAnalysis = document.getElementById("dnssecAnalysis");
+const echStatus = document.getElementById("echStatus");
+const dnssecRecords = document.getElementById("dnssecRecords");
+const otherRecords = document.getElementById("otherRecords");
+const otherCount = document.getElementById("otherCount");
+const authorityRecords = document.getElementById("authorityRecords");
+const additionalRecords = document.getElementById("additionalRecords");
+const nslookup = document.getElementById("nslookup");
+const raw = document.getElementById("raw");
+const rdapSummary = document.getElementById("rdapSummary");
+const rdapRaw = document.getElementById("rdapRaw");
+const rdapQueryName = document.getElementById("rdapQueryName");
+const clientIPStatus = document.getElementById("clientIPStatus");
+const clientIPv4 = document.getElementById("clientIPv4");
+const clientIPv6 = document.getElementById("clientIPv6");
+const clientISP = document.getElementById("clientISP");
+const clientColo = document.getElementById("clientColo");
+const clientLocation = document.getElementById("clientLocation");
+const clientKex = document.getElementById("clientKex");
+const clientECH = document.getElementById("clientECH");
+const clientHTTP = document.getElementById("clientHTTP");
+const clientTLS = document.getElementById("clientTLS");
+const clientWARP = document.getElementById("clientWARP");
+const clientGateway = document.getElementById("clientGateway");
+
+let _lastDnsRaw = null;
+let _lastRdapRaw = null;
+
+function writeCombinedRaw() {
+  const payload = {};
+  if (_lastDnsRaw !== null) payload.dns = _lastDnsRaw;
+  if (_lastRdapRaw !== null) payload.rdap = _lastRdapRaw;
+  if (!Object.keys(payload).length) {
+    raw.textContent = "尚未查詢";
+    return;
+  }
+  raw.textContent = JSON.stringify(payload, null, 4);
+}
+
+function escapeHTML(value) {
+  return String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+/* =========================================================
+   URL / HISTORY
+========================================================= */
+function syncURL(mode, recordType) {
+  try {
+    const params = new URLSearchParams();
+    params.set("domain", domain.value.trim());
+    if (mode) params.set("mode", mode);
+    if (recordType) params.set("type", recordType);
+    window.history.replaceState(null, "", window.location.pathname + "?" + params.toString());
+  } catch (e) {}
+}
+
+function applyURLParams() {
+  const params = new URLSearchParams(window.location.search);
+  const qDomain = params.get("domain");
+  if (!qDomain) return;
+  domain.value = qDomain;
+}
+
+const HISTORY_KEY = "dnsLookupHistory";
+const HISTORY_MAX = 12;
+
+function loadHistory() {
+  try {
+    const list = JSON.parse(localStorage.getItem(HISTORY_KEY) || "[]");
+    return Array.isArray(list) ? list : [];
+  } catch (e) { return []; }
+}
+function saveHistory(list) {
+  try { localStorage.setItem(HISTORY_KEY, JSON.stringify(list)); } catch (e) {}
+}
+function pushHistory(mode, recordType) {
+  const name = domain.value.trim();
+  if (!name) return;
+  let list = loadHistory().filter(h => !(h.domain === name && h.mode === mode && h.type === (recordType || "")));
+  list.unshift({ domain: name, mode, type: recordType || "", ts: Date.now() });
+  if (list.length > HISTORY_MAX) list = list.slice(0, HISTORY_MAX);
+  saveHistory(list);
+  renderHistory();
+}
+function modeLabel(mode) {
+  return { single: "查詢", all: "全域", dnssec: "DNSSEC", rdap: "RDAP", ct: "憑證" }[mode] || mode;
+}
+function renderHistory() {
+  const list = loadHistory();
+  if (!list.length) {
+    historyChips.innerHTML = `<span class="empty">尚無查詢紀錄</span>`;
+    return;
+  }
+  historyChips.innerHTML = list.map(h => `
+    <button type="button" class="history-chip"
+      data-domain="${escapeHTML(h.domain)}"
+      data-mode="${escapeHTML(h.mode)}"
+      data-type="${escapeHTML(h.type)}">
+      ${escapeHTML(h.domain)}
+    </button>
+  `).join("");
+}
+
+async function copyElementText(targetId, btn) {
+  const el = document.getElementById(targetId);
+  if (!el) return;
+  try {
+    await navigator.clipboard.writeText(el.textContent);
+    const o = btn.textContent;
+    btn.textContent = "已複製";
+    btn.classList.add("copied");
+    setTimeout(() => { btn.textContent = o; btn.classList.remove("copied"); }, 1500);
+  } catch (e) {
+    btn.textContent = "複製失敗";
+    setTimeout(() => { btn.textContent = "複製"; }, 1500);
+  }
+}
+
+function downloadElementText(targetId, ext, mimeType, btn) {
+  const el = document.getElementById(targetId);
+  if (!el || !el.textContent.trim()) return;
+  const name = (domain && domain.value.trim()) || "dns-lookup";
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+  const filename = name.replace(/[^a-zA-Z0-9.\-_]/g, "_") + "_" + stamp + "." + ext;
+  const blob = new Blob([el.textContent], { type: mimeType + ";charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
+  if (btn) {
+    const o = btn.textContent;
+    btn.textContent = "已下載";
+    btn.classList.add("copied");
+    setTimeout(() => { btn.textContent = o; btn.classList.remove("copied"); }, 1500);
+  }
+}
+
+function typeName(value) { return DNS_TYPES[value] || String(value); }
+
+async function queryDNS(name, recordType) {
+  const url = DNS_API + "?name=" + encodeURIComponent(name) + "&type=" + encodeURIComponent(recordType) + "&do=1";
+  const response = await fetch(url, {
+    method: "GET",
+    headers: { "Accept": "application/dns-json" },
+    cache: "no-store"
+  });
+  if (!response.ok) throw new Error("HTTP " + response.status + " " + response.statusText);
+  return await response.json();
+}
+
+/* =========================================================
+   MAIL
+========================================================= */
+function extractRecordData(dnsResults, type) {
+  const item = dnsResults.find(r => r.type === type);
+  if (!item || !item.data || !Array.isArray(item.data.Answer)) return [];
+  return item.data.Answer.filter(a => typeName(a.type) === type);
+}
+function unquoteTXT(raw) {
+  if (typeof raw !== "string") return "";
+  const matches = raw.match(/"([^"\\]*(?:\\.[^"\\]*)*)"/g);
+  if (matches && matches.length) return matches.map(m => m.slice(1, -1)).join("");
+  return raw.replace(/^"|"$/g, "");
+}
+function parseSPFQualifier(record) {
+  const m = record.match(/([+\-~?])all\b/i);
+  if (!m) return "none";
+  return { "-": "hardfail", "~": "softfail", "?": "neutral", "+": "pass" }[m[1]] || "none";
+}
+function isNullMX(mxAnswers) {
+  return mxAnswers.length === 1 && /^0\s+\.?$/.test(mxAnswers[0].data.trim());
+}
+function countSPFLookups(record) {
+  const body = record.replace(/^v=spf1\s*/i, "");
+  const matches = body.match(/(?:^|\s)[+\-~?]?(include|a|mx|ptr|exists|redirect)(?:[:=][^\s]*)?(?=\s|$)/gi);
+  return matches ? matches.length : 0;
+}
+
+function renderMailSummary(name, dnsResults, dmarcData) {
+  const mxAnswers = extractRecordData(dnsResults, "MX");
+  const txtAnswers = extractRecordData(dnsResults, "TXT");
+  const caaAnswers = extractRecordData(dnsResults, "CAA");
+  const spfRecords = txtAnswers.map(a => unquoteTXT(a.data)).filter(t => /^v=spf1\b/i.test(t));
+  const dmarcAnswers = (dmarcData && Array.isArray(dmarcData.Answer)) ? dmarcData.Answer : [];
+  const dmarcRecords = dmarcAnswers.filter(a => typeName(a.type) === "TXT").map(a => unquoteTXT(a.data)).filter(t => /^v=DMARC1\b/i.test(t));
+  const nullMX = isNullMX(mxAnswers);
+  const hasRealMX = mxAnswers.length > 0 && !nullMX;
+  const spfQualifier = spfRecords.length ? parseSPFQualifier(spfRecords[0]) : null;
+  const spfBareDeny = spfRecords.length > 0 && spfQualifier === "hardfail" &&
+    !/[+\-~?]?(a|mx|ip4|ip6|include|exists|ptr)[:/]?/i.test(spfRecords[0].replace(/^v=spf1\s*/i, "").replace(/[+\-~?]all\b/i, ""));
+  let dmarcPolicy = null, dmarcPct = 100;
+  if (dmarcRecords.length) {
+    const pm = dmarcRecords[0].match(/p=(\w+)/i);
+    dmarcPolicy = pm ? pm[1].toLowerCase() : null;
+    const ctm = dmarcRecords[0].match(/pct=(\d+)/i);
+    if (ctm) dmarcPct = parseInt(ctm[1], 10);
+  }
+
+  let mxRow;
+  if (nullMX) {
+    mxRow = { label: "MX", level: "neutral", badge: "明確不收信",
+      detail: `<span class="mono">${escapeHTML(mxAnswers[0].data)}</span><div style="margin-top:4px">這是 RFC 7505 定義的 Null MX，明確宣告這個網域不接收郵件。</div>` };
+  } else if (hasRealMX) {
+    const sortedMX = mxAnswers.slice().sort((a, b) => {
+      const pa = parseInt(a.data.trim().split(/\s+/)[0], 10);
+      const pb = parseInt(b.data.trim().split(/\s+/)[0], 10);
+      return (isNaN(pa) ? 0 : pa) - (isNaN(pb) ? 0 : pb);
+    });
+    const note = sortedMX.length > 1
+      ? `設定了 ${sortedMX.length} 台郵件伺服器，依優先權（數字越小越優先）提供備援，其中一台故障時仍可收信。`
+      : `目前只有 1 台郵件伺服器，沒有備援 MX，這台如果故障或無法連線，寄給這個網域的信會延遲或退回。`;
+    mxRow = { label: "MX", level: "ok", badge: "已設定",
+      detail: sortedMX.map(a => `<span class="mono">${escapeHTML(a.data)}</span>`).join("") +
+        `<div style="margin-top:4px">${escapeHTML(note)}</div>` };
+  } else {
+    mxRow = { label: "MX", level: "warn", badge: "未設定", detail: "沒有 MX、也沒有 Null MX 宣告，狀態不明確：可能單純沒用到郵件，也可能是設定遺漏。" };
+  }
+
+  const spfLookupCount = spfRecords.length ? countSPFLookups(spfRecords[0]) : 0;
+  let spfRow;
+  if (!spfRecords.length) {
+    spfRow = { label: "SPF", level: "warn", badge: "未設定", detail: "未設定 SPF，沒有任何機制能限制誰可以冒用這個網域寄信。" };
+  } else if (spfRecords.length > 1) {
+    spfRow = { label: "SPF", level: "warn", badge: "設定重複",
+      detail: spfRecords.map(t => `<span class="mono">${escapeHTML(t)}</span>`).join("") +
+        `<div style="margin-top:4px">偵測到 ${spfRecords.length} 筆 SPF TXT 記錄，RFC 7208 規定同一個網域只能有一筆，多筆會直接讓 SPF 判定失效（PermError），等同完全沒有 SPF 保護，建議合併成一筆。</div>` };
+  } else if (spfQualifier === "pass") {
+    spfRow = { label: "SPF", level: "err", badge: "危險設定",
+      detail: spfRecords.map(t => `<span class="mono">${escapeHTML(t)}</span>`).join("") +
+        `<div style="margin-top:4px">結尾是 +all，等於明確允許任何伺服器都能冒充這個網域寄信，且會通過 SPF 驗證，是嚴重的寄件人偽造風險。</div>` };
+  } else if (spfBareDeny) {
+    spfRow = { label: "SPF", level: "neutral", badge: "明確不寄信",
+      detail: spfRecords.map(t => `<span class="mono">${escapeHTML(t)}</span>`).join("") +
+        `<div style="margin-top:4px">沒有授權任何主機、直接 -all，等於宣告這個網域不會透過任何伺服器寄信。</div>` };
+  } else if (spfQualifier === "hardfail" && spfLookupCount > 10) {
+    spfRow = { label: "SPF", level: "warn", badge: "可能失效",
+      detail: spfRecords.map(t => `<span class="mono">${escapeHTML(t)}</span>`).join("") +
+        `<div style="margin-top:4px">結尾雖然是嚴格的 -all，但收件方驗證時約會觸發 ${spfLookupCount} 次 DNS 查詢，超過 RFC 7208 規定的 10 次上限，很可能被直接判定失效，等同沒有 SPF 保護。</div>` };
+  } else if (spfQualifier === "hardfail") {
+    const budget = spfLookupCount >= 8
+      ? `收件方驗證這筆記錄時約會觸發 ${spfLookupCount}/10 次 DNS 查詢，接近上限，之後如果要再加 include 請留意。`
+      : `收件方驗證這筆記錄時約會觸發 ${spfLookupCount}/10 次 DNS 查詢，離上限還有餘裕。`;
+    spfRow = { label: "SPF", level: "ok", badge: "已設定（嚴格）",
+      detail: spfRecords.map(t => `<span class="mono">${escapeHTML(t)}</span>`).join("") +
+        `<div style="margin-top:4px">結尾是嚴格的 -all，未列入的伺服器寄信會直接被判定失敗。${escapeHTML(budget)}</div>` };
+  } else if (spfQualifier === "softfail") {
+    spfRow = { label: "SPF", level: "warn", badge: "已設定（寬鬆）",
+      detail: spfRecords.map(t => `<span class="mono">${escapeHTML(t)}</span>`).join("") +
+        `<div style="margin-top:4px">結尾是 ~all（softfail），未授權的來源仍可能被判為可疑但不會被直接拒絕。</div>` };
+  } else {
+    spfRow = { label: "SPF", level: "warn", badge: "已設定（中性）",
+      detail: spfRecords.map(t => `<span class="mono">${escapeHTML(t)}</span>`).join("") +
+        `<div style="margin-top:4px">結尾是 ?all 或沒有明確的 all 機制，防護效果有限。</div>` };
+  }
+
+  let dmarcRow;
+  if (!dmarcRecords.length) {
+    dmarcRow = { label: "DMARC", level: "warn", badge: "未設定", detail: "未設定 DMARC，SPF／DKIM 沒過也不會被擋下或收到失敗通報。" };
+  } else if (dmarcPolicy === "none") {
+    dmarcRow = { label: "DMARC", level: "warn", badge: "僅監控",
+      detail: dmarcRecords.map(t => `<span class="mono">${escapeHTML(t)}</span>`).join("") +
+        `<div style="margin-top:4px">政策是 p=none，只會收到報告，不會主動擋下或隔離偽造郵件。</div>` };
+  } else if ((dmarcPolicy === "reject" || dmarcPolicy === "quarantine") && dmarcPct < 100) {
+    dmarcRow = { label: "DMARC", level: "warn", badge: "未全面強制",
+      detail: dmarcRecords.map(t => `<span class="mono">${escapeHTML(t)}</span>`).join("") +
+        `<div style="margin-top:4px">政策是 p=${escapeHTML(dmarcPolicy)}，但 pct=${dmarcPct} 代表只有部分比例的失敗郵件會真的被套用這個政策，尚未全面生效。</div>` };
+  } else if (dmarcPolicy === "reject" || dmarcPolicy === "quarantine") {
+    dmarcRow = { label: "DMARC", level: "ok", badge: "已設定（強制）",
+      detail: dmarcRecords.map(t => `<span class="mono">${escapeHTML(t)}</span>`).join("") };
+  } else {
+    dmarcRow = { label: "DMARC", level: "warn", badge: "政策不明",
+      detail: dmarcRecords.map(t => `<span class="mono">${escapeHTML(t)}</span>`).join("") + `<div style="margin-top:4px">解析不出明確的 p= 政策值。</div>` };
+  }
+
+  const caaRow = {
+    label: "CAA",
+    level: caaAnswers.length ? "ok" : "warn",
+    badge: caaAnswers.length ? "已設定" : "未設定",
+    detail: caaAnswers.length
+      ? caaAnswers.map(a => `<span class="mono">${escapeHTML(a.data)}</span>`).join("")
+      : "未設定 CAA，任何憑證機構都能為這個網域簽發憑證，不是明確危險，但屬於較寬鬆的設定。"
+  };
+
+  const rows = [mxRow, spfRow, dmarcRow, caaRow];
+  const levelClass = { ok: "ok", warn: "warn", err: "err", neutral: "neutral" };
+
+  mailGrid.innerHTML = rows.map(r => `
+    <div class="block">
+      <div class="block-head">
+        <span class="tag ${levelClass[r.level]}">${escapeHTML(r.badge)}</span>
+        <span class="block-title">${escapeHTML(r.label)}</span>
+      </div>
+      <div class="block-body">${r.detail}</div>
+    </div>
+  `).join("");
+
+  let analysisTitle = "郵件安全綜合狀態";
+  let analysisLevel = "warn";
+  let analysisText = "";
+  const spfFullyLocked = spfBareDeny;
+  const spfNotDeclared = spfRecords.length === 0;
+  const spfWeak = spfQualifier === "softfail" || spfQualifier === "neutral" || spfQualifier === "none";
+  const spfHealthy = spfQualifier === "hardfail" && !spfBareDeny && spfRecords.length === 1 && spfLookupCount <= 10;
+  const dmarcNotDeclared = dmarcRecords.length === 0;
+  const dmarcEnforced = (dmarcPolicy === "reject" || dmarcPolicy === "quarantine") && dmarcPct >= 100;
+  const dmarcPartial = (dmarcPolicy === "reject" || dmarcPolicy === "quarantine") && dmarcPct < 100;
+
+  if (spfQualifier === "pass") {
+    analysisLevel = "err";
+    analysisText = "SPF 設定為 +all，任何伺服器寄的信都會通過這個網域的 SPF 驗證，形同沒有寄件人防護，非常容易被拿來偽造這個網域發送釣魚郵件，建議立即修正。";
+  } else if (spfRecords.length > 1) {
+    analysisText = "偵測到多筆 SPF TXT 記錄。RFC 7208 規定同一個網域只能有一筆 SPF 記錄，多筆會直接讓 SPF 判定為 PermError，等同完全沒有 SPF 保護，建議合併成一筆。";
+  } else if (spfQualifier === "hardfail" && !spfBareDeny && spfLookupCount > 10) {
+    analysisText = "SPF 結尾雖然是嚴格的 -all，但收件方驗證時約會觸發 " + spfLookupCount + " 次 DNS 查詢，超過 RFC 7208 規定的 10 次上限，很可能被直接判定失效，等同沒有 SPF 保護，建議精簡機制。";
+  } else if (nullMX && spfFullyLocked) {
+    analysisLevel = "neutral";
+    analysisText = "這個網域已經用 Null MX 與 SPF -all 雙重明確宣告：不接收郵件、也不透過任何伺服器寄信，沒有留下能被冒充的空間，是最乾淨安全的「不使用郵件服務」設定，不需要額外處理。";
+  } else if (nullMX && (spfNotDeclared || spfWeak)) {
+    analysisText = "這個網域用 Null MX 明確宣告不接收郵件，但" + (spfNotDeclared ? "沒有設定 SPF" : "SPF 結尾不是嚴格的 -all") + "，等於還沒有明確拒絕「別人假冒這個網域寄信」的可能性。由於不收信，把 SPF 補成乾淨的 v=spf1 -all 幾乎沒有副作用，建議一併設定。";
+  } else if (!hasRealMX && !nullMX && spfNotDeclared && dmarcNotDeclared) {
+    analysisText = "未設置郵件服務，但可能受仿冒：這個網域沒有 MX、也沒有 SPF 或 DMARC 的任何宣告。這通常代表這個網域本來就不用來收發郵件，本身不是問題；但因為沒有任何一筆紀錄明確表態「不允許別人冒充這個網域寄信」，理論上仍然有人可以偽造「來自這個網域」的寄件人去寄信。如果確定不會用這個網域收發信，補上 Null MX 和 v=spf1 -all 這兩筆記錄，就能明確關閉這個空間，且對現有服務沒有任何影響。";
+  } else if (!hasRealMX && !nullMX) {
+    if (spfHealthy && dmarcEnforced) {
+      analysisLevel = "ok";
+      analysisText = "雖然沒有 MX（目前應該不是用來收信的網域），但 SPF 嚴格拒絕未授權來源、DMARC 也強制執行，寄件人防偽的宣告是完整的。";
+    } else {
+      analysisText = "沒有 MX，這個網域目前應該不是用來收信的，但 SPF／DMARC 的設定還沒完整鎖定寄件來源，建議視情況補上 v=spf1 -all，或補上真正的 MX 讓用途更明確。";
+    }
+  } else if (hasRealMX && spfFullyLocked) {
+    analysisText = "這個網域有實際收信的郵件伺服器，但 SPF 是裸的 -all，沒有授權任何寄件來源。如果這個網域只收信、從不主動寄信，這其實是最嚴格的防偽設定；但如果它之後也會寄信出去，寄出的郵件會直接被判定 SPF 失敗，請確認這是否符合預期。";
+  } else if (hasRealMX && spfNotDeclared && dmarcNotDeclared) {
+    analysisText = "這個網域有實際收信的郵件伺服器，但完全沒有 SPF 或 DMARC，任何人都能簡單地偽造這個網域的寄件人，收件人幾乎無法辨別真偽，建議優先補上 SPF，再逐步加上 DMARC。";
+  } else if (hasRealMX && spfWeak && dmarcNotDeclared) {
+    analysisText = "有基本的 SPF，但強度較弱（softfail 或中性），且沒有 DMARC 提供政策與失敗回報，仍有一定的被冒用風險。";
+  } else if (hasRealMX && spfHealthy && dmarcNotDeclared) {
+    analysisText = "SPF 設定良好（嚴格 -all），已經能擋下多數偽造來源，但還沒有 DMARC，收不到失敗回報、也沒有一致性比對，建議補上 DMARC（可以先從 p=none 開始觀察）。";
+  } else if (hasRealMX && spfHealthy && dmarcPolicy === "none") {
+    analysisText = "SPF 設定良好（-all），但 DMARC 目前是 p=none，僅監控不會主動擋下或隔離偽造郵件，等於防護的最後一道還沒真正打開，觀察一段時間確認沒有誤判後，建議調整為 quarantine 或 reject。";
+  } else if (hasRealMX && spfHealthy && dmarcPartial) {
+    analysisText = "SPF 設定良好，DMARC 政策也是 " + (dmarcPolicy || "") + "，但 pct=" + dmarcPct + " 代表只有部分比例的失敗郵件會真的被套用這個政策，尚未全面生效。";
+  } else if (hasRealMX && spfWeak && dmarcEnforced) {
+    analysisText = "DMARC 已經強制執行，但 SPF 強度較弱（softfail 或中性）。DMARC 只要 SPF 或 DKIM 其中一項通過並對齊就算合格，如果這個網域另外設定了 DKIM，實際防護可能比看起來更完整；如果沒有，建議把 SPF 加強成 -all。";
+  } else if (hasRealMX && spfHealthy && dmarcEnforced) {
+    analysisLevel = "ok";
+    analysisText = "SPF 與 DMARC 都已妥善設定（SPF 嚴格 -all 且 DNS 查詢次數在上限內、DMARC 強制執行），具備完整的寄件人防偽保護。";
+  } else {
+    analysisText = "郵件相關設定已部分到位，但還沒有完整覆蓋 SPF／DMARC 的組合防護，建議對照上方各項目逐一補強。";
+  }
+
+  mailAnalysis.className = "note " + analysisLevel;
+  mailAnalysis.innerHTML = `<strong>${escapeHTML(analysisTitle)}</strong><br>${escapeHTML(analysisText)}`;
+  recomputeMailStatus();
+}
+
+/* 郵件狀態短評（X / Y 項…）已移除 */
+function recomputeMailStatus() {}
+
+function parseMTASTSPolicy(text) {
+  const fields = Object.create(null);
+  text.split("\n").forEach(line => {
+    const m = line.match(/^\s*([a-zA-Z_]+)\s*:\s*(.+?)\s*$/);
+    if (m) {
+      const key = m[1].toLowerCase();
+      if (key === "mx") { fields.mx = fields.mx || []; fields.mx.push(m[2]); }
+      else fields[key] = m[2];
+    }
+  });
+  return fields;
+}
+
+async function checkMTASTS(name) {
+  let txtPresent = false, txtId = null;
+  try {
+    const data = await queryDNS("_mta-sts." + name, "TXT");
+    const answers = Array.isArray(data.Answer) ? data.Answer.map(a => unquoteTXT(a.data)) : [];
+    const rec = answers.find(t => /^v=STSv1/i.test(t));
+    if (rec) {
+      txtPresent = true;
+      const m = rec.match(/id=([^\s;]+)/i);
+      txtId = m ? m[1] : null;
+    }
+  } catch (e) {}
+  let policy = null, policyError = null;
+  if (txtPresent) {
+    try {
+      const res = await fetch("https://mta-sts." + name + "/.well-known/mta-sts.txt", { cache: "no-store" });
+      if (res.ok) policy = parseMTASTSPolicy(await res.text());
+      else policyError = "HTTP " + res.status;
+    } catch (e) { policyError = "cors_or_network"; }
+  }
+  return { txtPresent, txtId, policy, policyError };
+}
+
+async function checkDANE(mxAnswers) {
+  if (!mxAnswers.length) return { checked: false, hosts: [] };
+  const hosts = mxAnswers.map(a => a.data.trim().split(/\s+/)[1] || "").filter(Boolean).map(h => h.replace(/\.$/, ""));
+  const results = await Promise.all(hosts.map(async host => {
+    try {
+      const data = await queryDNS("_25._tcp." + host, "TLSA");
+      return { host, has: Array.isArray(data.Answer) && data.Answer.length > 0, dnssecValidated: data.AD === true, error: null };
+    } catch (error) {
+      return { host, has: false, dnssecValidated: false, error: error.message };
+    }
+  }));
+  return { checked: true, hosts: results };
+}
+
+async function renderAdvancedMailRows(name, mxAnswers, nullMX) {
+  if (nullMX) return;
+  mailGrid.insertAdjacentHTML("beforeend", `
+    <div class="block" id="mtaStsRow">
+      <div class="block-head"><span class="tag neutral">檢查中</span><span class="block-title">MTA-STS</span></div>
+      <div class="block-body">正在查詢…</div>
+    </div>
+    <div class="block" id="daneRow">
+      <div class="block-head"><span class="tag neutral">檢查中</span><span class="block-title">DANE（MX TLSA）</span></div>
+      <div class="block-body">正在查詢…</div>
+    </div>
+  `);
+
+  const [mtaSts, dane] = await Promise.all([
+    checkMTASTS(name).catch(() => ({ txtPresent: false, txtId: null, policy: null, policyError: null })),
+    checkDANE(mxAnswers).catch(() => ({ checked: false, hosts: [] }))
+  ]);
+
+  const mtaStsRow = document.getElementById("mtaStsRow");
+  if (mtaStsRow) {
+    let level = "warn", badge = "未設定";
+    let detail = "未設定 MTA-STS，這個網域收信時不會強制要求寄件方使用加密連線，仍可能被降級成明碼傳輸。";
+    if (mtaSts.txtPresent && mtaSts.policy) {
+      const mode = (mtaSts.policy.mode || "").toLowerCase();
+      if (mode === "enforce") {
+        level = "ok"; badge = "已設定（強制）";
+        detail = `<span class="mono">_mta-sts TXT：v=STSv1${mtaSts.txtId ? "; id=" + escapeHTML(mtaSts.txtId) : ""}</span>` +
+          `<span class="mono">policy：mode=${escapeHTML(mode)}${mtaSts.policy.mx ? "; mx=" + escapeHTML(mtaSts.policy.mx.join(", ")) : ""}</span>` +
+          `<div style="margin-top:4px">MTA-STS 設定正確且為強制模式，支援的寄件方會拒絕以未加密或憑證無效的連線寄信給這個網域。</div>`;
+      } else if (mode === "testing") {
+        badge = "測試模式";
+        detail = `<span class="mono">policy：mode=testing</span><div style="margin-top:4px">目前是 testing 模式，只會收集失敗報告，不會真的擋下不安全的連線，正式上線前記得改成 enforce。</div>`;
+      } else if (mode === "none") {
+        badge = "未生效";
+        detail = `<span class="mono">policy：mode=none</span><div style="margin-top:4px">政策是 none，等同沒有強制效果。</div>`;
+      } else {
+        badge = "政策格式不明";
+        detail = "抓到政策檔案，但解析不出有效的 mode 欄位。";
+      }
+    } else if (mtaSts.txtPresent && mtaSts.policyError) {
+      badge = "已宣告，無法驗證";
+      detail = `偵測到 _mta-sts TXT 記錄${mtaSts.txtId ? "（id=" + escapeHTML(mtaSts.txtId) + "）" : ""}，但瀏覽器讀不到 https://mta-sts.${escapeHTML(name)}/.well-known/mta-sts.txt 這份政策檔案，最常見的原因是政策伺服器沒有開放跨網域請求（CORS）——這是給郵件伺服器讀的檔案，本來就不一定會開放給瀏覽器。不代表沒有設定，如果要確認實際內容，可以在終端機執行：` +
+        `<span class="mono">curl https://mta-sts.${escapeHTML(name)}/.well-known/mta-sts.txt</span>`;
+    }
+    mtaStsRow.innerHTML = `
+      <div class="block-head"><span class="tag ${level === "ok" ? "ok" : "warn"}">${escapeHTML(badge)}</span><span class="block-title">MTA-STS</span></div>
+      <div class="block-body">${detail}</div>`;
+  }
+
+  const daneRow = document.getElementById("daneRow");
+  if (daneRow) {
+    let level = "warn", badge = "未設定";
+    let detail = "MX 主機沒有 TLSA 記錄，寄件方無法用 DANE 驗證這個網域的郵件伺服器憑證，只能依賴一般的憑證鏈信任機制。";
+    if (dane.checked && dane.hosts.length) {
+      const withTLSA = dane.hosts.filter(h => h.has);
+      const validated = dane.hosts.filter(h => h.has && h.dnssecValidated);
+      const listHTML = dane.hosts.map(h => {
+        if (h.error) return `<div><span class="tag neutral">查詢失敗</span> ${escapeHTML(h.host)}（${escapeHTML(h.error)}）</div>`;
+        if (h.has && h.dnssecValidated) return `<div><span class="tag ok">已驗證</span> ${escapeHTML(h.host)}：有 TLSA，且通過 DNSSEC 驗證</div>`;
+        if (h.has) return `<div><span class="tag warn">未驗證</span> ${escapeHTML(h.host)}：有 TLSA，但這次查詢沒有通過 DNSSEC 驗證，記錄無法被信任</div>`;
+        return `<div><span class="tag neutral">無記錄</span> ${escapeHTML(h.host)}：沒有 TLSA 記錄</div>`;
+      }).join("");
+      if (validated.length === dane.hosts.length) {
+        level = "ok"; badge = "已設定（DNSSEC 已驗證）";
+        detail = listHTML + `<div style="margin-top:4px">所有 MX 主機都設定了 TLSA，且都通過 DNSSEC 驗證，支援 DANE 的寄件方能確認這個網域的郵件伺服器憑證沒有被冒充。</div>`;
+      } else if (withTLSA.length > 0) {
+        badge = "部分設定";
+        detail = listHTML + `<div style="margin-top:4px">並非所有 MX 主機都有通過 DNSSEC 驗證的 TLSA 記錄，DANE 保護不完整。</div>`;
+      } else detail = listHTML;
+    }
+    daneRow.innerHTML = `
+      <div class="block-head"><span class="tag ${level === "ok" ? "ok" : "warn"}">${escapeHTML(badge)}</span><span class="block-title">DANE（MX TLSA）</span></div>
+      <div class="block-body">${detail}</div>`;
+  }
+  recomputeMailStatus();
+}
+
+/* =========================================================
+   DNSBL
+========================================================= */
+const DNSBL_PROVIDERS = [
+  { name: "Spamhaus ZEN", zone: "zen.spamhaus.org" },
+  { name: "SpamCop", zone: "bl.spamcop.net" },
+  { name: "Barracuda", zone: "b.barracudacentral.org" },
+  { name: "SORBS", zone: "dnsbl.sorbs.net" }
+];
+const DNSBL_RESERVED_CODES = {
+  "zen.spamhaus.org": {
+    "127.255.255.252": "查詢的 zone 名稱有誤",
+    "127.255.255.254": "透過公共／開放解析器查詢遭拒",
+    "127.255.255.255": "查詢量超過免費額度"
+  }
+};
+function reverseIPv4(ip) { return ip.split(".").reverse().join("."); }
+
+async function checkDNSBL(ip, provider) {
+  const query = reverseIPv4(ip) + "." + provider.zone;
+  try {
+    const data = await queryDNS(query, "A");
+    const answers = Array.isArray(data.Answer) ? data.Answer.map(a => a.data) : [];
+    if (!answers.length) return { ip, provider, listed: false, answers: [], note: null, error: null };
+    const reservedMap = DNSBL_RESERVED_CODES[provider.zone] || {};
+    const reservedNotes = answers.map(a => reservedMap[a]).filter(Boolean);
+    if (reservedNotes.length === answers.length) {
+      return { ip, provider, listed: "throttled", answers, note: reservedNotes[0], error: null };
+    }
+    return { ip, provider, listed: true, answers, note: null, error: null };
+  } catch (error) {
+    return { ip, provider, listed: null, answers: [], note: null, error: error.message };
+  }
+}
+
+function renderBlacklistResults(ips, results) {
+  blacklistGrid.innerHTML = ips.map(ip => {
+    const rows = results.filter(r => r.ip === ip);
+    const listedCount = rows.filter(r => r.listed === true).length;
+    const unknownCount = rows.filter(r => r.listed === null || r.listed === "throttled").length;
+    return `
+      <div class="result-item">
+        <div class="result-item-head">
+          <span class="result-item-name">${escapeHTML(ip)}</span>
+          <span class="tag ${listedCount > 0 ? "err" : "ok"}">${listedCount > 0 ? "列入 " + listedCount + " 個" : "乾淨"}</span>
+        </div>
+        <div class="result-item-meta">
+          ${rows.map(r => {
+            if (r.listed === true) return `<div><span class="tag err">已列入</span> ${escapeHTML(r.provider.name)}（${escapeHTML(r.answers.join(", "))}）</div>`;
+            if (r.listed === "throttled") return `<div><span class="tag neutral">已節流</span> ${escapeHTML(r.provider.name)}${r.note ? "（" + escapeHTML(r.note) + "）" : ""}</div>`;
+            if (r.listed === false) return `<div><span class="tag ok">乾淨</span> ${escapeHTML(r.provider.name)}</div>`;
+            return `<div><span class="tag neutral">無法判斷</span> ${escapeHTML(r.provider.name)}${r.error ? "（" + escapeHTML(r.error) + "）" : ""}</div>`;
+          }).join("")}
+        </div>
+      </div>`;
+  }).join("");
+
+  const totalListed = results.filter(r => r.listed === true).length;
+  const totalThrottled = results.filter(r => r.listed === "throttled").length;
+  let statusText = totalListed > 0 ? "檢查完成，共發現 " + totalListed + " 筆黑名單命中" : "檢查完成，沒有發現黑名單命中";
+  if (totalThrottled > 0) statusText += "（另有 " + totalThrottled + " 筆查詢被節流、結果不可靠）";
+  blacklistStatus.textContent = statusText;
+  blacklistStatus.style.color = totalListed > 0 ? "var(--err)" : (totalThrottled > 0 ? "var(--warn)" : "var(--ok)");
+}
+
+async function runBlacklistCheck() {
+  if (!requireTurnstile()) return;
+  const ips = window.__lastIPv4 || [];
+  if (!ips.length) {
+    blacklistStatus.textContent = "目前沒有可檢查的 IPv4，請先查詢網域";
+    blacklistStatus.style.color = "var(--err)";
+    return;
+  }
+  blacklistBtn.disabled = true;
+  blacklistStatus.textContent = "正在查詢 " + ips.length + " 個 IP × " + DNSBL_PROVIDERS.length + " 個黑名單…";
+  blacklistStatus.style.color = "var(--muted)";
+  blacklistGrid.innerHTML = `<div class="empty">查詢中…</div>`;
+  try {
+    const tasks = [];
+    ips.forEach(ip => DNSBL_PROVIDERS.forEach(p => tasks.push(checkDNSBL(ip, p))));
+    renderBlacklistResults(ips, await Promise.all(tasks));
+  } catch (error) {
+    blacklistStatus.textContent = "檢查失敗：" + error.message;
+    blacklistStatus.style.color = "var(--err)";
+  }
+  blacklistBtn.disabled = false;
+}
+
+/* =========================================================
+   CT
+========================================================= */
+function renderCTFromCertSpotter(name, data) {
+  if (!Array.isArray(data) || !data.length) {
+    ctGrid.innerHTML = `<div class="empty">查無憑證透明度紀錄（CertSpotter）</div>`;
+    ctStatus.textContent = "0 筆 · CertSpotter";
+    if (ctStatusSummary) ctStatusSummary.innerHTML = `<div class="empty">0 筆憑證</div>`;
+    return;
+  }
+  const now = new Date();
+  const rows = data.slice().sort((a, b) => new Date(b.not_before) - new Date(a.not_before));
+  const shown = rows.slice(0, 40);
+  ctGrid.innerHTML = shown.map(c => {
+    const notBefore = new Date(c.not_before);
+    const notAfter = new Date(c.not_after);
+    const expired = notAfter < now;
+    const revoked = !!c.revoked;
+    const sans = Array.isArray(c.dns_names) ? c.dns_names : [];
+    const issuer = (c.issuer && (c.issuer.friendly_name || c.issuer.name)) || "未知簽發者";
+    let badgeClass = "ok", badgeText = "有效";
+    if (revoked) { badgeClass = "err"; badgeText = "已撤銷"; }
+    else if (expired) { badgeClass = "err"; badgeText = "已過期"; }
+    return `
+      <div class="rec">
+        <div class="rec-head">
+          <span class="tag ${badgeClass}">${badgeText}</span>
+          <span class="rec-name">${escapeHTML(issuer)}</span>
+        </div>
+        <div class="rec-data">${escapeHTML(sans[0] || name)}</div>
+        <div class="rec-detail">
+          <span class="lab">有效期間</span><span class="val">${notBefore.toISOString().slice(0,10)} ~ ${notAfter.toISOString().slice(0,10)}</span>
+          <span class="lab">SAN（${sans.length}）</span><span class="val">${escapeHTML(sans.join(", ") || "—")}</span>
+          <span class="lab">SHA-256</span><span class="val">${escapeHTML(c.cert_sha256 || c.tbs_sha256 || "—")}</span>
+        </div>
+      </div>`;
+  }).join("");
+  ctStatus.textContent = rows.length + " 筆（CertSpotter）" + (rows.length > shown.length ? "，顯示最新 " + shown.length + " 筆" : "");
+  if (ctStatusSummary) {
+    const valid = data.filter(c => new Date(c.not_after) >= now && !c.revoked).length;
+    ctStatusSummary.innerHTML = `
+      <div><dt>來源</dt><dd>CertSpotter</dd></div>
+      <div><dt>憑證數</dt><dd>${data.length}</dd></div>
+      <div><dt>有效 / 已過期或撤銷</dt><dd><span style="color:var(--ok)">${valid}</span> / <span style="color:var(--err)">${data.length - valid}</span></dd></div>`;
+  }
+}
+
+function renderCTFromCrtsh(name, data) {
+  if (!Array.isArray(data) || !data.length) {
+    ctGrid.innerHTML = `<div class="empty">查無憑證透明度紀錄</div>`;
+    ctStatus.textContent = "0 筆 · crt.sh";
+    if (ctStatusSummary) ctStatusSummary.innerHTML = `<div class="empty">0 筆憑證</div>`;
+    return;
+  }
+  const seen = new Set();
+  const rows = [];
+  data.forEach(c => {
+    const key = (c.common_name || "") + "|" + (c.not_before || "") + "|" + (c.not_after || "");
+    if (seen.has(key)) return;
+    seen.add(key);
+    rows.push(c);
+  });
+  rows.sort((a, b) => new Date(b.not_before) - new Date(a.not_before));
+  const shown = rows.slice(0, 40);
+  const now = new Date();
+  ctGrid.innerHTML = shown.map(c => {
+    const notBefore = new Date(c.not_before);
+    const notAfter = new Date(c.not_after);
+    const expired = notAfter < now;
+    const sans = Array.from(new Set(String(c.name_value || "").split("\n").filter(Boolean)));
+    return `
+      <div class="rec">
+        <div class="rec-head">
+          <span class="tag ${expired ? "err" : "ok"}">${expired ? "已過期" : "有效"}</span>
+          <span class="rec-name">${escapeHTML(c.issuer_name || "未知簽發者")}</span>
+        </div>
+        <div class="rec-data">${escapeHTML(c.common_name || "（無 CN）")}</div>
+        <div class="rec-detail">
+          <span class="lab">有效期間</span><span class="val">${notBefore.toISOString().slice(0,10)} ~ ${notAfter.toISOString().slice(0,10)}</span>
+          <span class="lab">SAN（${sans.length}）</span><span class="val">${escapeHTML(sans.join(", ") || "—")}</span>
+          <span class="lab">crt.sh</span><span class="val"><a class="rdap-link" href="https://crt.sh/?id=${encodeURIComponent(c.id)}" target="_blank" rel="noopener">#${escapeHTML(String(c.id))}</a></span>
+        </div>
+      </div>`;
+  }).join("");
+  ctStatus.textContent = rows.length + " 筆不重複 · crt.sh" + (rows.length > shown.length ? "，顯示最新 " + shown.length : "");
+  if (ctStatusSummary) {
+    const valid = rows.filter(c => new Date(c.not_after) >= now).length;
+    ctStatusSummary.innerHTML = `
+      <div><dt>來源</dt><dd>crt.sh</dd></div>
+      <div><dt>不重複憑證</dt><dd>${rows.length}</dd></div>
+      <div><dt>有效 / 過期</dt><dd><span style="color:var(--ok)">${valid}</span> / <span style="color:var(--err)">${rows.length - valid}</span></dd></div>`;
+  }
+}
+
+async function fetchCertSpotter(name) {
+  const normalized = await normalizeRDAPDomain(name);
+  const queryName = normalized.domain;
+  const url = CERTSPOTTER_API + "?domain=" + encodeURIComponent(queryName) + "&include_subdomains=true&expand=dns_names&expand=issuer";
+  const response = await fetch(url, { cache: "no-store", headers: { "Accept": "application/json" } });
+  if (!response.ok) throw new Error("CertSpotter HTTP " + response.status);
+  return await response.json();
+}
+async function fetchCrtsh(name) {
+  const normalized = await normalizeRDAPDomain(name);
+  const queryName = normalized.domain;
+  const url = CRTSH_API + "?q=" + encodeURIComponent(queryName) + "&output=json";
+  const response = await fetch(url, { cache: "no-store" });
+  if (!response.ok) throw new Error("crt.sh HTTP " + response.status);
+  return await response.json();
+}
+
+/* =========================================================
+   STACK TEST
+========================================================= */
+async function testStack(url, label) {
+  const start = performance.now();
+  try {
+    const response = await fetch(url + "?_=" + Date.now(), { cache: "no-store" });
+    const elapsed = Math.round(performance.now() - start);
+    if (!response.ok) throw new Error("HTTP " + response.status);
+    const text = await response.text();
+    const trace = Object.create(null);
+    text.split("\n").forEach(line => {
+      const i = line.indexOf("=");
+      if (i > 0) trace[line.slice(0, i).trim()] = line.slice(i + 1).trim();
+    });
+    return { label, ok: true, elapsed, ip: trace.ip || "", colo: trace.colo || "" };
+  } catch (error) {
+    return { label, ok: false, elapsed: Math.round(performance.now() - start), error: error.message || "連線失敗" };
+  }
+}
+
+function renderStackTest(v4, v6) {
+  const box = r => r.ok ? `
+    <div class="result-item">
+      <div class="result-item-head">
+        <span class="result-item-name">${escapeHTML(r.label)}</span>
+        <span class="tag ok">可連線</span>
+      </div>
+      <div class="result-item-meta">${r.elapsed} ms · ${escapeHTML(coloDisplay(r.colo))} · ${escapeHTML(r.ip)}</div>
+    </div>` : `
+    <div class="result-item">
+      <div class="result-item-head">
+        <span class="result-item-name">${escapeHTML(r.label)}</span>
+        <span class="tag err">無法連線</span>
+      </div>
+      <div class="result-item-meta">${r.elapsed} ms</div>
+      <div class="result-item-err">${escapeHTML(r.error)}</div>
+    </div>`;
+  stackGrid.innerHTML = box(v4) + box(v6);
+  if (v4.ok && v6.ok) {
+    const faster = v4.elapsed <= v6.elapsed ? "IPv4" : "IPv6";
+    stackStatus.textContent = "雙棧皆可連 · " + faster + " 較快（差 " + Math.abs(v4.elapsed - v6.elapsed) + " ms）";
+    stackStatus.style.color = "var(--ok)";
+  } else if (v4.ok) {
+    stackStatus.textContent = "僅 IPv4 可連，此網路目前無可用 IPv6";
+    stackStatus.style.color = "var(--warn)";
+  } else if (v6.ok) {
+    stackStatus.textContent = "僅 IPv6 可連，可能是 IPv6-only / NAT64";
+    stackStatus.style.color = "var(--warn)";
+  } else {
+    stackStatus.textContent = "IPv4 / IPv6 皆無法連到 Cloudflare";
+    stackStatus.style.color = "var(--err)";
+  }
+}
+
+async function runStackTest() {
+  if (!requireTurnstile()) return;
+  if (stackTestBtn) stackTestBtn.disabled = true;
+  stackStatus.textContent = "測試中…";
+  stackStatus.style.color = "var(--muted)";
+  stackGrid.innerHTML = `<div class="empty">測試中…</div>`;
+  try {
+    const [v4, v6] = await Promise.all([
+      testStack(STACK_TEST_V4, "IPv4 · 1.1.1.1"),
+      testStack(STACK_TEST_V6, "IPv6 · 2606:4700:4700::1111")
+    ]);
+    renderStackTest(v4, v6);
+  } finally {
+    if (stackTestBtn) stackTestBtn.disabled = false;
+  }
+}
+
+/* =========================================================
+   RDAP
+========================================================= */
+function cleanDomainInput(value) {
+  let input = String(value || "").trim().toLowerCase();
+  input = input.replace(/^[a-z][a-z0-9+.-]*:\/\//, "");
+  input = input.split("/")[0].split("?")[0].split("#")[0];
+  if (input.startsWith("[") && input.endsWith("]")) return input.slice(1, -1);
+  if (/^[^:]+:\d+$/.test(input)) input = input.replace(/:\d+$/, "");
+  return input.replace(/\.$/, "");
+}
+function isIPv4(ip) {
+  if (!/^(?:\d{1,3}\.){3}\d{1,3}$/.test(ip || "")) return false;
+  return ip.split(".").every(x => Number(x) >= 0 && Number(x) <= 255);
+}
+function isIPv6(ip) { return !!ip && ip.includes(":"); }
+function isValidDomainName(value) {
+  const input = cleanDomainInput(value);
+  if (!input || isIPv4(input) || isIPv6(input)) return true;
+  if (input.length > 253 || /\.\.|^\.|\.$/.test(input)) return false;
+  const labels = input.split(".");
+  if (labels.some(label => !label || label.length > 63)) return false;
+  for (const label of labels) {
+    if (label.startsWith("-") || label.endsWith("-")) return false;
+    // Deliberately do not use a TLD allowlist. DNS names may contain `_` for
+    // service records, and newly delegated TLDs must not be blocked locally.
+    if (!/^[a-z0-9_\-\u0080-\uffff]+$/i.test(label)) return false;
+    try {
+      const ascii = new URL("http://" + label).hostname;
+      if (new TextEncoder().encode(ascii).length > 63) return false;
+    } catch (_) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function registrableCandidates(value) {
+  const cleaned = cleanDomainInput(value);
+  if (!cleaned || isIPv4(cleaned) || isIPv6(cleaned)) return [cleaned];
+  const labels = cleaned.split(".").filter(Boolean);
+  if (labels.length <= 2) return [cleaned];
+  // Start at the complete hostname and progressively remove left-most labels.
+  // RDAP, rather than a hard-coded TLD list, decides which candidate is actually
+  // registered. This handles co.uk, com.tw, new TLDs, private arrangements,
+  // and other suffix policies without rejecting valid names at the input stage.
+  return labels.map((_, i) => labels.slice(i).join(".")).filter(x => x.split(".").length >= 2);
+}
+
+const _rdapDomainCache = new Map();
+async function queryRDAPCandidate(domainName) {
+  if (_rdapDomainCache.has(domainName)) return _rdapDomainCache.get(domainName);
+  const promise = fetch(RDAP_API + encodeURIComponent(domainName), {
+    method: "GET",
+    headers: { "Accept": "application/rdap+json, application/json" },
+    cache: "no-store"
+  }).then(async response => {
+    if (!response.ok) throw new Error("RDAP HTTP " + response.status);
+    return await response.json();
+  });
+  _rdapDomainCache.set(domainName, promise);
+  try { return await promise; }
+  catch (error) { _rdapDomainCache.delete(domainName); throw error; }
+}
+
+async function normalizeRDAPDomain(value) {
+  const cleaned = cleanDomainInput(value);
+  if (isIPv4(cleaned) || isIPv6(cleaned)) return { input: cleaned, domain: cleaned, changed: false, data: null };
+  if (!isValidDomainName(cleaned)) throw new Error("網域名稱格式無效");
+  const candidates = registrableCandidates(cleaned);
+  for (const candidate of candidates) {
+    try {
+      const data = await queryRDAPCandidate(candidate);
+      return { input: cleaned, domain: candidate, changed: cleaned !== candidate, data };
+    } catch (_) {}
+  }
+  // RDAP may be temporarily unavailable or a registry may not expose an object.
+  // Do not block DNS lookup. For certificate lookup, use the least-specific
+  // candidate only as a fallback; a successful RDAP result always wins above.
+  const fallback = candidates.length > 1 ? candidates[candidates.length - 1] : cleaned;
+  return { input: cleaned, domain: fallback, changed: cleaned !== fallback, data: null };
+}
+
+async function queryWHOISFallback(domainName) {
+  const url = WHOIS_API + "?domain=" + encodeURIComponent(domainName);
+  const response = await fetch(url, {
+    method: "GET",
+    headers: { "Accept": "application/json" },
+    cache: "no-store"
+  });
+  if (!response.ok) throw new Error("WHOIS API HTTP " + response.status);
+  const payload = await response.json();
+  if (!payload || payload.ok !== true || !payload.data) {
+    throw new Error(payload?.error?.message || "WHOIS API 無有效資料");
+  }
+  const w = payload.data;
+  const events = [];
+  if (w.created) events.push({ eventAction: "registration", eventDate: w.created });
+  if (w.expires) events.push({ eventAction: "expiration", eventDate: w.expires });
+  if (w.updated) events.push({ eventAction: "last changed", eventDate: w.updated });
+  const registrar = w.registrar ? [{
+    handle: "whois-api-registrar",
+    roles: ["registrar"],
+    vcardArray: ["vcard", [["fn", {}, "text", String(w.registrar)]]]
+  }] : [];
+  const nameservers = Array.isArray(w.nameServers)
+    ? w.nameServers.map(ns => ({ ldhName: String(ns) }))
+    : [];
+  return {
+    objectClassName: "domain",
+    handle: w.domain || domainName,
+    ldhName: w.domain || domainName,
+    status: Array.isArray(w.status) ? w.status : [],
+    events,
+    entities: registrar,
+    nameservers,
+    _source: "WHOIS API (Domainee)",
+    _whoisRaw: payload
+  };
+}
+
+async function queryRDAP(value) {
+  const normalized = await normalizeRDAPDomain(value);
+  if (isIPv4(normalized.domain) || isIPv6(normalized.domain)) {
+    throw new Error("RDAP 目前僅支援網域名稱，不支援 IP 位址");
+  }
+  if (normalized.data) {
+    return { input: normalized.input, domain: normalized.domain, changed: normalized.changed, data: normalized.data, source: "RDAP" };
+  }
+  try {
+    const data = await queryRDAPCandidate(normalized.domain);
+    return { input: normalized.input, domain: normalized.domain, changed: normalized.changed, data, source: "RDAP" };
+  } catch (rdapError) {
+    // RDAP 全部候選失敗後，改用免 API Key 的 WHOIS JSON 服務。
+    const data = await queryWHOISFallback(normalized.domain);
+    return { input: normalized.input, domain: normalized.domain, changed: normalized.changed, data, source: "WHOIS API", rdapError: rdapError.message };
+  }
+}
+
+function formatRDAPDate(value) {
+  if (!value) return "—";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? String(value) : date.toISOString();
+}
+function getRDAPEvent(data, eventAction) {
+  const events = Array.isArray(data?.events) ? data.events : [];
+  const event = events.find(item => item.eventAction === eventAction);
+  return event?.eventDate || null;
+}
+function getEntityName(entity) {
+  const vcard = entity?.vcardArray;
+  if (!Array.isArray(vcard) || !Array.isArray(vcard[1])) return null;
+  for (const item of vcard[1]) {
+    if (item[0] === "fn" && item[3]) return item[3];
+  }
+  return null;
+}
+
+function renderRDAPStatus(statuses) {
+  if (!Array.isArray(statuses) || !statuses.length) return `<div class="empty">沒有狀態資料</div>`;
+  return `<div style="display:flex;flex-wrap:wrap;gap:6px">${statuses.map(v =>
+    `<span class="tag">${escapeHTML(v)}</span>`).join("")}</div>`;
+}
+
+function renderRDAPEntities(entities) {
+  if (!Array.isArray(entities) || !entities.length) {
+    return `<div class="empty">沒有公開註冊人員／組織資料。</div>`;
+  }
+  return entities.map((entity, index) => {
+    const roles = Array.isArray(entity.roles) ? entity.roles : [];
+    const name = getEntityName(entity);
+    return `
+      <div class="rec">
+        <div class="rec-head">
+          <span class="tag">ENTITY</span>
+          <span class="rec-name">${escapeHTML(name || entity.handle || "Entity " + (index + 1))}</span>
+        </div>
+        <div class="rec-detail">
+          <span class="lab">Handle</span><span class="val">${escapeHTML(entity.handle || "—")}</span>
+          <span class="lab">Roles</span><span class="val">${escapeHTML(roles.join(", ") || "—")}</span>
+        </div>
+      </div>`;
+  }).join("");
+}
+
+function renderRDAP(result) {
+  if (!result) {
+    rdapQueryName.textContent = "尚未查詢";
+    rdapSummary.innerHTML = `<div class="empty">尚未查詢 RDAP。</div>`;
+    if (rdapRaw) rdapRaw.textContent = "尚未查詢";
+    _lastRdapRaw = null;
+    writeCombinedRaw();
+    if (rdapStatusSummary) rdapStatusSummary.innerHTML = `<div class="empty">尚未查詢 RDAP。</div>`;
+    return;
+  }
+  const data = result.data;
+  const sourceLabel = result.source === "WHOIS API" ? "WHOIS API" : "RDAP";
+  rdapQueryName.textContent = result.changed
+    ? "輸入：" + result.input + " → " + sourceLabel + "：" + result.domain
+    : sourceLabel + "：" + result.domain;
+
+  const registration = getRDAPEvent(data, "registration");
+  const expiration = getRDAPEvent(data, "expiration");
+  const lastChanged = getRDAPEvent(data, "last changed");
+  const registrar = Array.isArray(data.entities)
+    ? data.entities.find(e => Array.isArray(e.roles) && e.roles.includes("registrar")) : null;
+  const registrarName = getEntityName(registrar);
+  const nameservers = Array.isArray(data.nameservers) ? data.nameservers : [];
+  const statuses = Array.isArray(data.status) ? data.status : [];
+
+  if (rdapStatusSummary) {
+    rdapStatusSummary.innerHTML = `
+      <div><dt>資料來源</dt><dd>${escapeHTML(sourceLabel)}</dd></div>
+      <div><dt>RDAP 網域</dt><dd>${escapeHTML(result.domain)}</dd></div>
+      <div><dt>Registrar</dt><dd>${escapeHTML(registrarName || "—")}</dd></div>
+      <div><dt>到期</dt><dd>${escapeHTML(formatRDAPDate(expiration))}</dd></div>
+      <div><dt>Status</dt><dd>${escapeHTML(statuses.slice(0, 3).join(", ") || "—")}</dd></div>
+      <div><dt>Nameserver</dt><dd>${nameservers.length}</dd></div>`;
+  }
+
+  rdapSummary.innerHTML = `
+    <dl class="dl" style="margin-bottom:20px">
+      <dt>Handle</dt><dd>${escapeHTML(data.handle || "—")}</dd>
+      <dt>Registrar</dt><dd>${escapeHTML(registrarName || "—")}</dd>
+      <dt>註冊時間</dt><dd>${escapeHTML(formatRDAPDate(registration))}</dd>
+      <dt>到期時間</dt><dd>${escapeHTML(formatRDAPDate(expiration))}</dd>
+      <dt>最後變更</dt><dd>${escapeHTML(formatRDAPDate(lastChanged))}</dd>
+    </dl>
+    <p style="font-size:12.5px;color:var(--muted);margin-bottom:8px">Domain Status</p>
+    ${renderRDAPStatus(data.status)}
+    <p style="font-size:12.5px;color:var(--muted);margin:20px 0 8px">Nameservers</p>
+    ${nameservers.length
+      ? nameservers.map(ns => `
+        <div class="rec">
+          <div class="rec-head"><span class="tag">NS</span></div>
+          <div class="rec-data">${escapeHTML(ns.ldhName || ns.unicodeName || "—")}</div>
+        </div>`).join("")
+      : `<div class="empty">沒有 Nameserver 資料</div>`}
+    <p style="font-size:12.5px;color:var(--muted);margin:20px 0 8px">Registrar / Entity</p>
+    ${renderRDAPEntities(data.entities)}`;
+
+  _lastRdapRaw = data;
+  if (rdapRaw) rdapRaw.textContent = JSON.stringify(data, null, 4);
+  writeCombinedRaw();
+}
+
+/* =========================================================
+   CLIENT TRACE
+========================================================= */
+function coloDisplay(colo) {
+  const code = String(colo || "").toLowerCase();
+  const names = {
+    sin:"新加坡",tpe:"台北",khh:"高雄",hkg:"香港",nrt:"東京",kix:"大阪",icn:"首爾",
+    kul:"吉隆坡",bkk:"曼谷",syd:"雪梨",mel:"墨爾本",fra:"法蘭克福",ams:"阿姆斯特丹",
+    lhr:"倫敦",cdg:"巴黎",mad:"馬德里",mil:"米蘭",lax:"洛杉磯",sfo:"舊金山",sjc:"聖荷西",
+    sea:"西雅圖",nyc:"紐約",iad:"華盛頓特區",ord:"芝加哥",dfw:"達拉斯",yyz:"多倫多",
+    yvr:"溫哥華",gru:"聖保羅",jnb:"約翰尼斯堡",bom:"孟買",del:"德里",dub:"杜拜",ist:"伊斯坦堡"
+  };
+  return code ? `${code} · ${names[code] || "Cloudflare"}` : "—";
+}
+function formatECH(echValue, sniValue) {
+  const ech = String(echValue || "").trim().toLowerCase();
+  const sni = String(sniValue || "").trim().toLowerCase();
+  if (sni === "encrypted" || ech === "encrypted") return "已啟用（已加密）";
+  if (["on","enabled","yes","true"].includes(ech)) return "已啟用";
+  if (["off","disabled","no","false"].includes(ech)) return "未啟用";
+  return echValue || "—";
+}
+function formatState(v) {
+  const x = String(v || "").toLowerCase();
+  if (["on","enabled","yes","true"].includes(x)) return "已啟用";
+  if (["off","disabled","no","false"].includes(x)) return "未啟用";
+  return v || "—";
+}
+
+async function loadClientIP() {
+  try {
+    const response = await fetch("/cdn-cgi/trace?_=" + Date.now(), { cache: "no-store" });
+    if (!response.ok) throw new Error("HTTP " + response.status);
+    const trace = Object.create(null);
+    (await response.text()).split("\n").forEach(line => {
+      const i = line.indexOf("=");
+      if (i > 0) trace[line.slice(0, i).trim()] = line.slice(i + 1).trim();
+    });
+    const ip = trace.ip || "";
+    clientIPv4.textContent = isIPv4(ip) ? ip : "本次連線未使用";
+    clientIPv6.textContent = isIPv6(ip) ? ip : "本次連線未使用";
+    clientColo.textContent = coloDisplay(trace.colo);
+    clientLocation.textContent = trace.loc || "—";
+    clientKex.textContent = trace.kex || "—";
+    clientECH.textContent = formatECH(trace.ech, trace.sni);
+    clientHTTP.textContent = trace.http || "—";
+    clientTLS.textContent = trace.tls || "—";
+    clientWARP.textContent = formatState(trace.warp);
+    clientGateway.textContent = formatState(trace.gateway);
+    if (ip) {
+      try {
+        const r = await fetch("https://ipwho.is/" + encodeURIComponent(ip), { cache: "no-store" });
+        if (r.ok) {
+          const m = await r.json();
+          const c = m.connection || {};
+          clientISP.textContent = [c.org || c.isp, c.asn ? "AS" + c.asn : ""].filter(Boolean).join(" · ") || "—";
+        } else clientISP.textContent = "無法取得";
+      } catch (_) { clientISP.textContent = "無法取得"; }
+    } else clientISP.textContent = "無法取得";
+    clientIPStatus.textContent = "已取得 Cloudflare 連線資訊";
+    clientIPStatus.style.color = "var(--ok)";
+  } catch (error) {
+    [clientIPv4,clientIPv6,clientISP,clientColo,clientLocation,clientKex,clientECH,clientHTTP,clientTLS,clientWARP,clientGateway]
+      .forEach(el => { el.textContent = "取得失敗"; });
+    clientIPStatus.textContent = error.message || "請求失敗";
+    clientIPStatus.style.color = "var(--err)";
+  }
+}
+
+/* =========================================================
+   DNS RECORD HELPERS
+========================================================= */
+function recordKey(record) { return [record.name, record.type, record.TTL, record.data].join("|"); }
+function collectRecords(resultSet, section) {
+  const records = [], seen = new Set();
+  for (const item of resultSet) {
+    if (!item.data || !Array.isArray(item.data[section])) continue;
+    for (const record of item.data[section]) {
+      const key = recordKey(record);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      records.push(record);
+    }
+  }
+  return records;
+}
+function parseDNSDate(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return String(value);
+  const date = new Date(number * 1000);
+  return Number.isNaN(date.getTime()) ? String(value) : date.toISOString();
+}
+function parseRRSIG(data) {
+  const parts = String(data).trim().split(/\s+/);
+  if (parts.length < 9) return null;
+  return { typeCovered: parts[0], algorithm: parts[1], labels: parts[2], originalTTL: parts[3],
+    expiration: parts[4], inception: parts[5], keyTag: parts[6], signer: parts[7], signature: parts.slice(8).join(" ") };
+}
+function parseDS(data) {
+  const parts = String(data).trim().split(/\s+/);
+  if (parts.length < 4) return null;
+  const digestNames = { 1: "SHA-1", 2: "SHA-256", 4: "SHA-384" };
+  const algorithmNames = { 5:"RSASHA1",7:"RSASHA1-NSEC3-SHA1",8:"RSASHA256",10:"RSASHA512",13:"ECDSAP256SHA256",14:"ECDSAP384SHA384",15:"ED25519",16:"ED448" };
+  return { keyTag: parts[0], algorithm: parts[1], algorithmName: algorithmNames[Number(parts[1])] || "Unknown",
+    digestType: parts[2], digestName: digestNames[Number(parts[2])] || "Unknown", digest: parts.slice(3).join(" ") };
+}
+function parseDNSKEY(data) {
+  const parts = String(data).trim().split(/\s+/);
+  if (parts.length < 4) return null;
+  const flags = Number(parts[0]), algorithm = Number(parts[2]);
+  const algorithmNames = { 5:"RSASHA1",7:"RSASHA1-NSEC3-SHA1",8:"RSASHA256",10:"RSASHA512",13:"ECDSAP256SHA256",14:"ECDSAP384SHA384",15:"ED25519",16:"ED448" };
+  let keyType = "Unknown";
+  if (flags === 257) keyType = "KSK / SEP";
+  else if (flags === 256) keyType = "ZSK";
+  return { flags, protocol: parts[1], algorithm, algorithmName: algorithmNames[algorithm] || "Unknown", keyType, publicKey: parts.slice(3).join(" ") };
+}
+
+function analyzeDNSSEC(records, responseData) {
+  const hasDS = records.some(r => Number(r.type) === 43);
+  const hasDNSKEY = records.some(r => Number(r.type) === 48);
+  const hasRRSIG = records.some(r => Number(r.type) === 46);
+  const hasNSEC = records.some(r => Number(r.type) === 47);
+  const hasNSEC3 = records.some(r => Number(r.type) === 50);
+  const ad = responseData?.AD === true;
+  const cd = responseData?.CD === true;
+  let title = "DNSSEC 狀態無法判定", css = "warn", explanation = "";
+  if (ad && hasRRSIG && (hasNSEC || hasNSEC3)) {
+    title = "DNSSEC 已驗證"; css = "ok";
+    explanation = "這個網域的回應同時包含 RRSIG 簽章與 NSEC / NSEC3 存在性證明，解析器也回傳了 AD=true（Authenticated Data），代表從根到這個網域的整條信任鏈已經驗證通過，回應內容沒有被竄改的跡象。";
+  } else if (ad && hasRRSIG) {
+    title = "DNSSEC 已驗證"; css = "ok";
+    explanation = "回應包含 DNSSEC 簽章（RRSIG），且解析器標示 AD=true，代表這次查詢的驗證已經通過。";
+  } else if (cd) {
+    title = "DNSSEC 驗證被停用"; css = "warn";
+    explanation = "查詢時的 CD（Checking Disabled）旗標為 true，代表刻意跳過驗證，無法從這次回應判斷這個網域的 DNSSEC 實際上是否有效。";
+  } else if (hasRRSIG && (hasNSEC || hasNSEC3)) {
+    title = "發現 DNSSEC 資料"; css = "warn";
+    explanation = "回應裡有 RRSIG 與 NSEC / NSEC3，這個網域應該有簽署 DNSSEC，但解析器沒有標示 AD=true，代表這次查詢並未完成驗證，可能跟查詢路徑或解析器設定有關。";
+  } else if (hasDS || hasDNSKEY) {
+    title = "發現 DNSSEC 設定"; css = "warn";
+    explanation = "偵測到 DS 或 DNSKEY 記錄，代表這個網域至少有部分 DNSSEC 設定，但目前的回應內容不足以確認完整的驗證鏈是否成立。";
+  } else {
+    title = "沒有發現明顯 DNSSEC 資料"; css = "neutral";
+    explanation = "沒有偵測到 DS、DNSKEY、RRSIG 或 NSEC / NSEC3 中的任何一項，這個網域目前應該沒有部署 DNSSEC。";
+  }
+  return { title, css, explanation, hasDS, hasDNSKEY, hasRRSIG, hasNSEC, hasNSEC3, ad, cd };
+}
+
+function analyzeECH(records) {
+  const echRecords = records.filter(r => {
+    const t = Number(r.type);
+    return (t === 64 || t === 65) && /\bech=/i.test(String(r.data));
+  });
+  if (echRecords.length) {
+    return { title: "ECH 已發現", css: "ok", text: "HTTPS 或 SVCB 記錄裡帶有 ech 參數，代表這個網域已經設定加密的用戶端問候（Encrypted Client Hello），能在 TLS 交握時隱藏實際連往的網站名稱（SNI），減少中間路由觀察到的資訊。" };
+  }
+  const hasHTTPSorSVCB = records.some(r => { const t = Number(r.type); return t === 64 || t === 65; });
+  if (hasHTTPSorSVCB) {
+    return { title: "未發現 ECH", css: "warn", text: "有 HTTPS 或 SVCB 記錄，但裡面沒有 ech 參數，代表這個網域目前沒有啟用 ECH。" };
+  }
+  return { title: "無 ECH DNS 資料", css: "neutral", text: "沒有 HTTPS 或 SVCB 記錄，無法單從 DNS 判斷這個網域是否支援 ECH。" };
+}
+
+function renderRecord(record) {
+  const recordType = typeName(record.type);
+  let details = "";
+  if (Number(record.type) === 43) {
+    const p = parseDS(record.data);
+    if (p) details = `<div class="rec-detail">
+      <span class="lab">Key Tag</span><span class="val">${escapeHTML(p.keyTag)}</span>
+      <span class="lab">Algorithm</span><span class="val">${escapeHTML(p.algorithm + " (" + p.algorithmName + ")")}</span>
+      <span class="lab">Digest Type</span><span class="val">${escapeHTML(p.digestType + " (" + p.digestName + ")")}</span>
+      <span class="lab">Digest</span><span class="val">${escapeHTML(p.digest)}</span></div>`;
+  }
+  if (Number(record.type) === 48) {
+    const p = parseDNSKEY(record.data);
+    if (p) details = `<div class="rec-detail">
+      <span class="lab">Key Type</span><span class="val">${escapeHTML(p.keyType)}</span>
+      <span class="lab">Flags</span><span class="val">${escapeHTML(p.flags)}</span>
+      <span class="lab">Protocol</span><span class="val">${escapeHTML(p.protocol)}</span>
+      <span class="lab">Algorithm</span><span class="val">${escapeHTML(p.algorithm + " (" + p.algorithmName + ")")}</span>
+      <span class="lab">Public Key</span><span class="val">${escapeHTML(p.publicKey)}</span></div>`;
+  }
+  if (Number(record.type) === 46) {
+    const p = parseRRSIG(record.data);
+    if (p) details = `<div class="rec-detail">
+      <span class="lab">Signed Type</span><span class="val">${escapeHTML(p.typeCovered)}</span>
+      <span class="lab">Algorithm</span><span class="val">${escapeHTML(p.algorithm)}</span>
+      <span class="lab">Labels</span><span class="val">${escapeHTML(p.labels)}</span>
+      <span class="lab">Original TTL</span><span class="val">${escapeHTML(p.originalTTL)}</span>
+      <span class="lab">Inception</span><span class="val">${escapeHTML(parseDNSDate(p.inception))}</span>
+      <span class="lab">Expiration</span><span class="val">${escapeHTML(parseDNSDate(p.expiration))}</span>
+      <span class="lab">Key Tag</span><span class="val">${escapeHTML(p.keyTag)}</span>
+      <span class="lab">Signer</span><span class="val">${escapeHTML(p.signer)}</span></div>`;
+  }
+  return `
+    <div class="rec">
+      <div class="rec-head">
+        <span class="tag">${escapeHTML(recordType)}</span>
+        <span class="rec-name">${escapeHTML(record.name)}</span>
+        <span class="rec-ttl">TTL ${escapeHTML(record.TTL)}</span>
+      </div>
+      <div class="rec-data">${escapeHTML(record.data)}</div>
+      ${details}
+    </div>`;
+}
+
+function renderIPSummary(records) {
+  const aRecords = records.filter(r => Number(r.type) === 1);
+  const aaaaRecords = records.filter(r => Number(r.type) === 28);
+  function renderBox(name, items) {
+    const content = items.length
+      ? `<ul>${items.map(r => `<li>${escapeHTML(r.data)}</li>`).join("")}</ul>`
+      : `<div class="empty">沒有 ${name} Record</div>`;
+    return `<div class="ip-col"><h3>${name}</h3>${content}</div>`;
+  }
+  ipSummary.innerHTML = renderBox("A · IPv4", aRecords) + renderBox("AAAA · IPv6", aaaaRecords);
+  ipSummaryText.textContent = "IPv4 " + aRecords.length + " 筆 · IPv6 " + aaaaRecords.length + " 筆";
+}
+
+function renderDNSSECSummary(records, responseData) {
+  const a = analyzeDNSSEC(records, responseData);
+  dnssecSummary.innerHTML = `
+    <div><dt>驗證狀態</dt><dd class="${a.css}">${escapeHTML(a.title)}</dd></div>
+    <div><dt>AD</dt><dd>${a.ad ? "true" : "false"}</dd></div>
+    <div><dt>DS</dt><dd>${a.hasDS ? "存在" : "沒有"}</dd></div>
+    <div><dt>DNSKEY</dt><dd>${a.hasDNSKEY ? "存在" : "沒有"}</dd></div>
+    <div><dt>RRSIG</dt><dd>${a.hasRRSIG ? "存在" : "沒有"}</dd></div>
+    <div><dt>NSEC / NSEC3</dt><dd>${a.hasNSEC ? "NSEC" : (a.hasNSEC3 ? "NSEC3" : "沒有")}</dd></div>`;
+  dnssecFlags.innerHTML = `
+    <div><dt>AD</dt><dd class="${a.ad ? "ok" : "muted"}">${a.ad ? "已驗證" : "否"}</dd></div>
+    <div><dt>CD</dt><dd>${a.cd ? "Checking Disabled" : "否"}</dd></div>
+    <div><dt>DO</dt><dd>1</dd></div>
+    <div><dt>RA</dt><dd>${responseData?.RA ? "支援" : "否"}</dd></div>`;
+  dnssecAnalysis.className = "note " + a.css;
+  dnssecAnalysis.innerHTML = `<strong>${escapeHTML(a.title)}</strong><br>${escapeHTML(a.explanation)}`;
+}
+
+function renderECHStatus(records) {
+  const ech = analyzeECH(records);
+  echStatus.className = "note " + ech.css;
+  echStatus.innerHTML = `<strong>${escapeHTML(ech.title)}</strong><br>${escapeHTML(ech.text)}`;
+}
+
+function renderDNSSECRecords(records) {
+  if (!records.length) {
+    dnssecRecords.innerHTML = `<div class="empty">沒有找到 DNSSEC 詳細紀錄。</div>`;
+    return;
+  }
+  dnssecRecords.innerHTML = records.map(r => renderRecord(r)).join("");
+}
+
+function renderOtherRecords(records) {
+  const other = records.filter(r => {
+    const t = Number(r.type);
+    return t !== 1 && t !== 28 && t !== 43 && t !== 46 && t !== 47 && t !== 48 && t !== 50 && t !== 6;
+  });
+  otherCount.textContent = other.length + " 筆";
+  if (!other.length) {
+    otherRecords.innerHTML = `<div class="empty">沒有其他 DNS Answer 紀錄。</div>`;
+    return;
+  }
+  otherRecords.innerHTML = other.map(r => renderRecord(r)).join("");
+}
+
+function renderSection(element, records) {
+  if (!records.length) {
+    element.innerHTML = `<div class="empty">沒有資料</div>`;
+    return;
+  }
+  element.innerHTML = records.map(r => renderRecord(r)).join("");
+}
+
+function renderSummary(name, mode, records, elapsed, rdapResult = null) {
+  const types = [...new Set(records.map(r => typeName(r.type)))];
+  summaryMode.textContent = mode;
+  summaryMode.style.color = "var(--muted)";
+  summaryGrid.innerHTML = `
+    <div><dt>網域</dt><dd>${escapeHTML(name)}</dd></div>
+    <div><dt>Resolver</dt><dd class="muted">Cloudflare 1.1.1.1</dd></div>
+    <div><dt>狀態</dt><dd class="ok">成功</dd></div>
+    <div><dt>DNS 唯一紀錄</dt><dd>${records.length}</dd></div>
+    <div><dt>耗時</dt><dd>${elapsed} ms</dd></div>
+    <div><dt>Record Types</dt><dd class="muted">${types.length ? escapeHTML(types.join(", ")) : "無"}</dd></div>
+    ${rdapResult ? `<div><dt>RDAP Domain</dt><dd class="muted">${escapeHTML(rdapResult.domain)}</dd></div>` : ""}`;
+}
+
+function buildNSLookup(name, resultSet, mode) {
+  const answers = collectRecords(resultSet, "Answer");
+  const authority = collectRecords(resultSet, "Authority");
+  const additional = collectRecords(resultSet, "Additional");
+  const firstData = resultSet.find(item => item.data)?.data;
+  let output = "Server:  cloudflare-dns.com\nAddress: 1.1.1.1\n\n";
+  output += "Query:   " + name + "\nMode:    " + mode + "\n\n";
+  if (firstData?.AD) output += "DNSSEC:  AD (Authenticated Data)\n\n";
+  if (answers.length) {
+    output += "Answer:\n\n";
+    for (const r of answers) {
+      output += "Name:    " + r.name + "\nType:    " + typeName(r.type) + "\nTTL:     " + r.TTL + "\nData:    " + r.data + "\n\n";
+    }
+  }
+  if (authority.length) {
+    output += "Authority:\n\n";
+    for (const r of authority) {
+      output += "Name:    " + r.name + "\nType:    " + typeName(r.type) + "\nTTL:     " + r.TTL + "\nData:    " + r.data + "\n\n";
+    }
+  }
+  if (additional.length) {
+    output += "Additional:\n\n";
+    for (const r of additional) {
+      output += "Name:    " + r.name + "\nType:    " + typeName(r.type) + "\nTTL:     " + r.TTL + "\nData:    " + r.data + "\n\n";
+    }
+  }
+  return output;
+}
+
+function renderCompleteResult(name, resultSet, mode, elapsed, rdapResult = null) {
+  const answers = collectRecords(resultSet, "Answer");
+  const authority = collectRecords(resultSet, "Authority");
+  const additional = collectRecords(resultSet, "Additional");
+  const allRecords = [];
+  const seen = new Set();
+  for (const record of [...answers, ...authority, ...additional]) {
+    const key = recordKey(record);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    allRecords.push(record);
+  }
+  renderSummary(name, mode, allRecords, elapsed, rdapResult);
+  renderIPSummary(allRecords);
+  const responseData = resultSet.find(item => item.data)?.data || {};
+  renderDNSSECSummary(allRecords, responseData);
+  renderECHStatus(allRecords);
+  const dnssec = allRecords.filter(r => DNSSEC_TYPES.includes(typeName(r.type)));
+  renderDNSSECRecords(dnssec);
+  renderOtherRecords(allRecords);
+  renderSection(authorityRecords, authority);
+  renderSection(additionalRecords, additional);
+  nslookup.textContent = buildNSLookup(name, resultSet, mode);
+  _lastDnsRaw = resultSet;
+  writeCombinedRaw();
+  if (rdapResult) renderRDAP(rdapResult);
+  return allRecords.length;
+}
+
+
+/* =========================================================
+   GLOBAL LOOKUP
+========================================================= */
+async function globalLookup() {
+  if (!requireTurnstile()) return;
+  const name = cleanDomainInput(domain.value);
+  if (!name) {
+    status.textContent = "請先輸入網域名稱";
+    status.className = "status-line err";
+    return;
+  }
+  if (!isValidDomainName(name)) {
+    status.textContent = "網域名稱格式無效：請檢查標籤長度、空標籤或非法字元";
+    status.className = "status-line err";
+    return;
+  }
+  domain.value = name;
+  syncURL("all");
+  pushHistory("all");
+  setButtons(true);
+  status.textContent = "查詢中：DNS · DNSSEC · ECH · RDAP · 憑證透明度…";
+  status.className = "status-line";
+  const start = performance.now();
+  try {
+    const ctPromise = (async () => {
+      try {
+        const data = await fetchCertSpotter(name);
+        renderCTFromCertSpotter(name, data);
+        return { ok: true, source: "CertSpotter" };
+      } catch (e1) {
+        try {
+          const data = await fetchCrtsh(name);
+          renderCTFromCrtsh(name, data);
+          return { ok: true, source: "crt.sh" };
+        } catch (e2) {
+          if (ctStatus) { ctStatus.textContent = "查詢失敗"; ctStatus.style.color = "var(--err)"; }
+          if (ctGrid) ctGrid.innerHTML = `<div class="empty">憑證透明度查詢失敗</div>`;
+          if (ctStatusSummary) ctStatusSummary.innerHTML = `<div class="empty">查詢失敗</div>`;
+          return { ok: false, error: e2.message };
+        }
+      }
+    })();
+
+    const [dnsResults, rdapResult, dmarcData] = await Promise.all([
+      Promise.all(ALL_TYPES.map(async recordType => {
+        try {
+          const data = await queryDNS(name, recordType);
+          return { type: recordType, data, error: null };
+        } catch (error) {
+          return { type: recordType, data: null, error: error.message };
+        }
+      })),
+      queryRDAP(name).catch(error => ({ error: error.message })),
+      queryDNS("_dmarc." + name, "TXT").catch(error => ({ Answer: [], error: error.message }))
+    ]);
+    await ctPromise;
+
+    const successful = dnsResults.filter(item => item.data);
+    const failed = dnsResults.filter(item => item.error);
+    const elapsed = Math.round(performance.now() - start);
+    const validRDAP = rdapResult && !rdapResult.error ? rdapResult : null;
+    const count = renderCompleteResult(name, successful, "完整查詢", elapsed, validRDAP);
+
+    try {
+      renderMailSummary(name, successful, dmarcData);
+      const mxAnswersForAdvanced = extractRecordData(successful, "MX");
+      renderAdvancedMailRows(name, mxAnswersForAdvanced, isNullMX(mxAnswersForAdvanced)).catch(() => {});
+    } catch (mailError) {}
+
+    window.__lastIPv4 = extractRecordData(successful, "A").map(a => a.data);
+    window.__lastIPv6 = extractRecordData(successful, "AAAA").map(a => a.data);
+    if (blacklistStatus) {
+      blacklistStatus.textContent = window.__lastIPv4.length
+        ? "可檢查 " + window.__lastIPv4.length + " 個 IPv4"
+        : "此次查詢沒有 IPv4 可檢查";
+      blacklistStatus.style.color = "var(--muted)";
+    }
+    if (blacklistGrid) blacklistGrid.innerHTML = `<div class="empty">按「檢查黑名單」開始。</div>`;
+
+    if (rdapResult?.error) {
+      renderRDAP(null);
+      rdapQueryName.textContent = "RDAP 查詢失敗：" + rdapResult.error;
+    }
+
+    const dnsOK = successful.length > 0;
+    if (dnsOK && validRDAP) {
+      status.textContent = "完成 · DNS " + successful.length + "/" + ALL_TYPES.length + " · " + count + " 筆 · RDAP " + validRDAP.domain + " · " + elapsed + " ms";
+      status.className = failed.length ? "status-line warn" : "status-line ok";
+    } else if (dnsOK) {
+      status.textContent = "完成 · DNS 成功 · RDAP 失敗 · " + elapsed + " ms";
+      status.className = "status-line warn";
+    } else {
+      status.textContent = "查詢失敗";
+      status.className = "status-line err";
+    }
+  } catch (error) {
+    status.textContent = "查詢失敗：" + error.message;
+    status.className = "status-line err";
+    raw.textContent = error.stack || error.toString();
+  }
+  setButtons(false);
+}
+
+/* =========================================================
+   WATCH
+========================================================= */
+let watchTimer = null, watchDomainValue = null, watchSnapshot = null;
+const WATCH_INTERVAL_MS = 60000;
+
+function watchTimeString() {
+  return new Date().toLocaleTimeString("zh-TW", { hour12: false });
+}
+function flashIPSummary() {
+  const el = document.getElementById("ipSummary");
+  if (!el) return;
+  el.classList.remove("flash");
+  void el.offsetWidth;
+  el.classList.add("flash");
+}
+
+async function watchTick() {
+  if (!watchDomainValue) return;
+  if (!(window.__turnstileReady && window.__turnstileToken)) {
+    stopWatch();
+    watchStatus.textContent = "人機驗證已過期，監看已暫停";
+    watchStatus.style.color = "var(--err)";
+    return;
+  }
+  domain.value = watchDomainValue;
+  await globalLookup();
+  const ipSummaryEl = document.getElementById("ipSummary");
+  const snapshot = ipSummaryEl ? ipSummaryEl.textContent.replace(/\s+/g, "") : null;
+  const timeStr = watchTimeString();
+  if (watchSnapshot !== null && snapshot !== watchSnapshot) {
+    watchStatus.textContent = "偵測到 A／AAAA 變動！最後檢查 " + timeStr;
+    watchStatus.style.color = "var(--warn)";
+    flashIPSummary();
+  } else {
+    watchStatus.textContent = "監看中 · 最後檢查 " + timeStr + " · 結果未變";
+    watchStatus.style.color = "var(--ok)";
+  }
+  watchSnapshot = snapshot;
+}
+
+function startWatch() {
+  if (!requireTurnstile()) return;
+  const name = domain.value.trim();
+  if (!name) {
+    status.textContent = "請先輸入網域名稱";
+    status.className = "status-line err";
+    return;
+  }
+  watchDomainValue = name;
+  watchSnapshot = null;
+  domain.disabled = true;
+  if (watchToggleBtn) watchToggleBtn.classList.add("active");
+  if (watchIcon) watchIcon.textContent = "◉";
+  if (watchLabel) watchLabel.textContent = "關閉監看（" + name + "）";
+  watchStatus.textContent = "監看已開啟，每 60 秒自動查詢";
+  watchStatus.style.color = "var(--ok)";
+  watchTick();
+  watchTimer = setInterval(watchTick, WATCH_INTERVAL_MS);
+}
+
+function stopWatch() {
+  if (watchTimer) { clearInterval(watchTimer); watchTimer = null; }
+  watchDomainValue = null;
+  watchSnapshot = null;
+  domain.disabled = false;
+  if (watchToggleBtn) watchToggleBtn.classList.remove("active");
+  if (watchIcon) watchIcon.textContent = "◎";
+  if (watchLabel) watchLabel.textContent = "開啟監看";
+  watchStatus.textContent = "監看關閉";
+  watchStatus.style.color = "var(--muted)";
+}
+
+/* =========================================================
+   TURNSTILE / BUTTONS / THEME
+========================================================= */
+function updateTurnstileUI(message) {
+  const btn = document.getElementById("lookupAll");
+  const hint = document.getElementById("turnstileHint");
+  const ready = !!(window.__turnstileReady && window.__turnstileToken);
+  if (ready) {
+    if (btn && !btn.dataset.querying) btn.disabled = false;
+    if (hint) { hint.innerHTML = message || "驗證完成，可以查詢"; hint.className = "turnstile-hint ok"; }
+  } else {
+    if (btn) btn.disabled = true;
+    if (hint) { hint.innerHTML = message || "請先完成人機驗證"; hint.className = "turnstile-hint"; }
+  }
+}
+window.__syncTurnstileUI = updateTurnstileUI;
+
+function requireTurnstile() {
+  if (window.__turnstileReady && window.__turnstileToken) return true;
+  if (status) {
+    status.textContent = "請先完成人機驗證後再查詢";
+    status.className = "status-line err";
+  }
+  updateTurnstileUI();
+  return false;
+}
+
+function setButtons(disabled) {
+  const btn = document.getElementById("lookupAll");
+  if (btn) {
+    if (disabled) { btn.dataset.querying = "1"; btn.disabled = true; }
+    else {
+      delete btn.dataset.querying;
+      btn.disabled = !(window.__turnstileReady && window.__turnstileToken);
+    }
+  }
+  const loader = document.getElementById("topLoader");
+  if (loader) loader.classList.toggle("on", disabled);
+}
+
+const THEME_KEY = "dnsLookupTheme";
+function getPreferredTheme() {
+  try {
+    const saved = localStorage.getItem(THEME_KEY);
+    if (saved === "light" || saved === "dark") return saved;
+  } catch (_) {}
+  if (window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches) return "dark";
+  return "light";
+}
+function applyTheme(theme) {
+  document.documentElement.setAttribute("data-theme", theme);
+  const label = document.getElementById("themeLabel");
+  if (label) label.textContent = theme === "dark" ? "亮色模式" : "暗色模式";
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.setAttribute("content", theme === "dark" ? "#121212" : "#f7f7f5");
+  try {
+    if (window.turnstile && window.__turnstileWidgetId != null && !window.__turnstileReady && typeof window.onTurnstileLoad === "function") {
+      window.turnstile.remove(window.__turnstileWidgetId);
+      window.__turnstileWidgetId = null;
+      window.onTurnstileLoad();
+    }
+  } catch (_) {}
+  try { localStorage.setItem(THEME_KEY, theme); } catch (_) {}
+}
+function toggleTheme() {
+  const current = document.documentElement.getAttribute("data-theme") || "light";
+  applyTheme(current === "dark" ? "light" : "dark");
+}
+applyTheme(getPreferredTheme());
+
+/* =========================================================
+   INIT + EVENTS
+========================================================= */
+
+/*
+ * 入站畫面：邊播放邊預先建立等會查詢會用到的連線
+ *（Cloudflare DoH、alice9394.uk、本站自己的 /cdn-cgi/trace），
+ * 讓瀏覽器提前完成 TLS 交握，之後使用者真正查詢時可以少一段等待。
+ * 這些都是打固定的自家/公開端點，不帶使用者輸入，不需要 Turnstile 驗證。
+ *
+ * 每條連線各自一行文字，格式是「主機名稱」+ 每 1 秒循環的點點
+ *（host. → host.. → host...），該條連線完成後獨立顯示「host...finished!」，
+ * 不等其他行；全部行都完成、或最多等滿 10 秒（兩者先到者為準）就淡出入站，
+ * 逾時未完成的連線不會擋住進站。
+ *
+ * 這整套視覺動畫只在同一分頁「第一次進站」播放（由最早期的同步腳本
+ * 判斷 sessionStorage 並加上 .no-intro class）；重新整理時完全跳過
+ * 動畫邏輯，但 loadClientIP() 這個實際功能性呼叫（填入網路狀態卡片）
+ * 不受影響，一定會執行。
+ */
+(function () {
+  const skipVisual = document.documentElement.classList.contains("no-intro");
+
+  const clientIPTask = loadClientIP().catch(() => {});
+  const selfHost = location.host || "本站";
+
+  const el = document.getElementById("netIntro");
+  const listEl = document.getElementById("netIntroList");
+
+  const doh1 = () => fetch("https://cloudflare-dns.com/dns-query?name=cloudflare.com&type=A", {
+    headers: { Accept: "application/dns-json" }, cache: "no-store"
+  }).catch(() => {});
+
+  const betaTask = () => fetch("https://beta.alice9394.uk/", {
+    method: "GET", cache: "no-store", credentials: "omit"
+  }).catch(() => {});
+
+  const rdapTask = () => fetch("https://rdap.org/", {
+    method: "GET", cache: "no-store", credentials: "omit"
+  }).catch(() => {});
+
+  const whoisWarm = () => fetch("https://api.domainee.dev/v1/tools/whois-lookup?domain=example.com", {
+    method: "GET", headers: { Accept: "application/json" }, cache: "no-store", credentials: "omit"
+  }).catch(() => {});
+
+  /* 動畫之外的服務也提早建立 TCP/TLS 連線；不強迫它們出現在動畫清單。 */
+  const certSpotterWarm = () => fetch("https://api.certspotter.com/", {
+    method: "HEAD", cache: "no-store", credentials: "omit"
+  }).catch(() => {});
+
+  const crtshWarm = () => fetch("https://crt.sh/", {
+    method: "HEAD", cache: "no-store", credentials: "omit"
+  }).catch(() => {});
+
+  const ipWhoWarm = () => fetch("https://ipwho.is/", {
+    method: "HEAD", cache: "no-store", credentials: "omit"
+  }).catch(() => {});
+
+  if (skipVisual || !el || !listEl) {
+    /* 重新整理：不播動畫，連線預熱仍然做，但不用等它、也不用管完成與否 */
+    doh1();
+    betaTask();
+    rdapTask();
+    whoisWarm();
+    certSpotterWarm();
+    crtshWarm();
+    ipWhoWarm();
+    return;
+  }
+
+  /* 要顯示的預熱連線清單：host 標籤 + 對應的實際連線動作 */
+  const targets = [
+    { host: "cloudflare-dns.com", task: doh1() },
+    { host: "beta.alice9394.uk", task: betaTask() },
+    { host: "rdap.org", task: rdapTask() }
+  ];
+
+  /* 其餘會用到的 API 不列入入站動畫，但同時開始預熱。 */
+  certSpotterWarm();
+  crtshWarm();
+  ipWhoWarm();
+  whoisWarm();
+  clientIPTask;
+
+  let removed = false;
+  function remove() {
+    if (removed) return;
+    removed = true;
+    el.classList.add("hide");
+    setTimeout(() => { try { el.remove(); } catch (_) {} }, 480);
+  }
+
+  /* 幫每條連線建立一行：獨立的點點循環計時器，該連線完成就停在 host...finished! */
+  function makeLine(host, task) {
+    const line = document.createElement("div");
+    line.className = "net-intro-line";
+    listEl.appendChild(line);
+
+    let dots = 1;
+    line.textContent = host + ".";
+    const dotTimer = setInterval(() => {
+      dots = (dots % 3) + 1;
+      line.textContent = host + ".".repeat(dots);
+    }, 1000);
+
+    function finish() {
+      clearInterval(dotTimer);
+      line.textContent = host + "...finished!";
+      line.classList.add("finished");
+    }
+
+    task.then(finish, finish);
+    return { finish };
+  }
+
+  targets.forEach(t => makeLine(t.host, t.task));
+
+  let settled = false;
+  Promise.allSettled(targets.map(t => t.task)).then(() => {
+    if (settled) return;
+    settled = true;
+    /* 全部連線都自然完成：讓「...finished!」多停留 1.5 秒再淡出，
+       讓使用者看得到完成狀態；逾時觸發的分支（下面）不套用這個延遲 */
+    setTimeout(remove, 1500);
+  });
+
+  setTimeout(() => {
+    if (settled) return;
+    settled = true;
+    /* 逾時觸發：不延遲，立刻淡出進站 */
+    remove();
+  }, 10000);
+})();
+
+updateTurnstileUI();
+applyURLParams();
+renderHistory();
+
+lookupAll.addEventListener("click", globalLookup);
+if (stackTestBtn) stackTestBtn.addEventListener("click", runStackTest);
+if (blacklistBtn) blacklistBtn.addEventListener("click", runBlacklistCheck);
+const themeToggleBtn = document.getElementById("themeToggle");
+if (themeToggleBtn) themeToggleBtn.addEventListener("click", toggleTheme);
+
+domain.addEventListener("keydown", event => {
+  if (event.key === "Enter") {
+    if (!requireTurnstile()) return;
+    globalLookup();
+  }
+});
+
+historyChips.addEventListener("click", event => {
+  const btn = event.target.closest(".history-chip");
+  if (!btn) return;
+  domain.value = btn.dataset.domain;
+  if (!requireTurnstile()) return;
+  globalLookup();
+});
+
+clearHistoryBtn.addEventListener("click", () => {
+  saveHistory([]);
+  renderHistory();
+});
+
+if (watchToggleBtn) {
+  watchToggleBtn.addEventListener("click", () => {
+    if (watchTimer) stopWatch();
+    else {
+      if (!requireTurnstile()) return;
+      startWatch();
+    }
+  });
+}
+
+document.addEventListener("click", event => {
+  const btn = event.target.closest(".copy-btn");
+  if (!btn) return;
+  if (btn.dataset.downloadTarget) {
+    downloadElementText(btn.dataset.downloadTarget, btn.dataset.downloadExt || "txt", btn.dataset.downloadMime || "text/plain", btn);
+    return;
+  }
+  copyElementText(btn.dataset.copyTarget, btn);
+});
+
+document.addEventListener("keydown", event => {
+  if (event.key !== "/") return;
+  const tag = document.activeElement.tagName;
+  if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA") return;
+  event.preventDefault();
+  domain.focus();
+  domain.select();
+});
+
+/* TOC active highlight */
+const tocLinks = document.querySelectorAll(".toc a");
+const sections = [...tocLinks].map(a => document.querySelector(a.getAttribute("href"))).filter(Boolean);
+function updateTocActive() {
+  let current = sections[0];
+  for (const sec of sections) {
+    if (sec.getBoundingClientRect().top <= 80) current = sec;
+  }
+  tocLinks.forEach(a => {
+    a.classList.toggle("active", a.getAttribute("href") === "#" + current.id);
+  });
+}
+window.addEventListener("scroll", updateTocActive, { passive: true });
+updateTocActive();
+</script>
+</body>
+</html>
